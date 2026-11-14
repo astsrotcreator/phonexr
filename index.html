@@ -45,7 +45,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.1</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.2</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -57,6 +57,18 @@
         <button class="secondary" id="demoBtn">Демо без камеры</button>
       </div>
       <div id="status" role="status">Готово к запуску. Для камеры нужна страница HTTPS или localhost.</div>
+    </section>
+    <section class="card" id="diagnostics">
+      <h2>📷 Проверка камеры</h2>
+      <p class="detail">Если Chrome не спрашивает разрешение, сначала нажми кнопку ниже: она включает только камеру, без VR и распознавания руки.</p>
+      <div id="cameraEnvironment" class="detail" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0"></div>
+      <div class="buttons">
+        <button id="testCameraBtn" class="primary" type="button">📷 Проверить камеру</button>
+        <button id="stopCameraBtn" class="secondary" type="button">Остановить</button>
+      </div>
+      <div id="cameraTestResult" role="status" class="detail" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Нажми «Проверить камеру».</div>
+      <video id="testPreview" autoplay muted playsinline style="display:none;width:100%;max-height:250px;background:#000;border-radius:12px;margin-top:8px"></video>
+      <p class="detail">Открывай сайт по HTTPS в Chrome, не внутри приложения GitHub. Если разрешение заблокировано, Chrome может не показывать запрос повторно.</p>
     </section>
     <section class="card">
       <h2>02 / Настройки оптики</h2>
@@ -88,6 +100,38 @@
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), ctx = canvas.getContext('2d',{alpha:false}), video=$('video');
 const status=$('status'), os=$('overlayStatus');
+let previewStream=null;
+function cameraAdvice(err){
+ const n=err&&err.name||'Error',message=(err&&err.message)||String(err);
+ let tip='Проверь HTTPS, доступ Chrome к камере и системный переключатель камеры.';
+ if(!isSecureContext || !navigator.mediaDevices?.getUserMedia)tip='Открой именно HTTPS-сайт на github.io в Chrome. В file:// или просмотре GitHub камера может быть недоступна.';
+ else if(['NotAllowedError','PermissionDeniedError','SecurityError'].includes(n))tip='Доступ заблокирован: Chrome → Настройки → Настройки сайтов → Камера. Также проверь разрешения Chrome в настройках Android.';
+ else if(['NotFoundError','OverconstrainedError'].includes(n))tip='Камера не найдена для этих параметров. Закрой другие приложения камеры.';
+ else if(['NotReadableError','TrackStartError'].includes(n))tip='Камера занята или блокируется системой. Закрой видеозвонки и перезапусти Chrome.';
+ return n+': '+message+'\\n'+tip;
+}
+async function refreshCameraInfo(){
+ let permission='неизвестно';
+ try{permission=(await navigator.permissions.query({name:'camera'})).state}catch{}
+ $('cameraEnvironment').textContent='Адрес: '+location.origin+'\\nHTTPS: '+(isSecureContext?'да':'нет')+'\\nAPI камеры: '+(!!navigator.mediaDevices?.getUserMedia?'есть':'нет')+'\\nРазрешение: '+permission;
+}
+function stopCameraTest(){
+ if(previewStream){previewStream.getTracks().forEach(t=>t.stop());previewStream=null}
+ const v=$('testPreview');v.pause();v.srcObject=null;v.style.display='none';
+}
+$('testCameraBtn').addEventListener('click',async()=>{
+ const result=$('cameraTestResult'),btn=$('testCameraBtn');
+ stopCameraTest();btn.disabled=true;result.textContent='Запрашиваю доступ к камере…';
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('getUserMedia отсутствует');
+  previewStream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+  const v=$('testPreview');v.srcObject=previewStream;v.style.display='block';
+  await v.play();result.textContent='✅ Камера работает! Поток получен.';
+ }catch(e){result.textContent='❌ '+cameraAdvice(e);console.error('camera test',e)}
+ finally{btn.disabled=false;refreshCameraInfo()}
+});
+$('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
+refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','noteText'];
 const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0};
@@ -165,13 +209,21 @@ async function loadHandTracking(sessionId){if(s.demo)return;s.trackerStatus='з�
  if(sessionId!==s.sessionId||!s.running){s.tracker?.close?.();s.tracker=null;return} s.trackerStatus='готово';os.textContent='Камера и жесты готовы • наведи палец, затем щипок';
  }catch(err){s.tracker=null;s.trackerStatus='ошибка';os.textContent='Жесты не загрузились: проверь интернет • сенсорный экран работает';console.error('MediaPipe load failed:',err)}}
 function runTracking(now){if(!s.tracker||!video.videoWidth||video.readyState<2)return;if(now-s.lastDetected<(s.lowPower?165:90))return;if(video.currentTime===s.lastVideoTime)return;s.lastDetected=now;s.lastVideoTime=video.currentTime;try{const result=s.tracker.detectForVideo(video,now);setHand(result.landmarks?.[0]||null)}catch(e){s.trackerStatus='ошибка';console.error(e);s.tracker?.close?.();s.tracker=null;os.textContent='Ошибка распознавания руки • можно пользоваться касаниями'}}
-async function enterMode(demo){if(s.running)return;const sessionId=++s.sessionId;syncSettings();status.textContent='Открываю камеру…';$('startBtn').disabled=true;$('demoBtn').disabled=true;try{
- if(!demo){if(!navigator.mediaDevices?.getUserMedia)throw new Error('Камера недоступна: открой страницу через HTTPS в Chrome.');const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},frameRate:{ideal:24,max:30}}});video.srcObject=stream;await video.play();s.cameraStatus='КАМЕРА';}
+async function enterMode(demo){if(s.running)return;stopCameraTest();const sessionId=++s.sessionId;syncSettings();status.textContent='Открываю камеру…';$('startBtn').disabled=true;$('demoBtn').disabled=true;try{
+ if(!demo){
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('Камера недоступна: открой HTTPS-сайт в Chrome.');
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},frameRate:{ideal:24,max:30}}})}
+  catch(e){if(['OverconstrainedError','NotFoundError'].includes(e?.name))stream=await navigator.mediaDevices.getUserMedia({audio:false,video:true});else throw e}
+  video.srcObject=stream;
+  try{await video.play()}catch(e){stream.getTracks().forEach(t=>t.stop());video.srcObject=null;throw e}
+  s.cameraStatus='КАМЕРА';
+ }
  else s.cameraStatus='ДЕМО';s.demo=demo;s.trackerStatus=demo?'выкл':'загрузка';s.running=true;initialWindows();s.timerLast=performance.now();$('setup').classList.add('hidden');$('screen').style.display='block';fit();
  try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
  try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
  os.textContent=demo?'Демо: управляй окнами касанием экрана':'Камера запущена • загружаю распознавание руки';requestAnimationFrame(render);if(!demo)loadHandTracking(sessionId);}
- catch(err){status.innerText='Не удалось запустить: '+(err?.message||err)+' Попробуй Chrome, HTTPS и разрешение камеры.';console.error(err)}finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}}
+ catch(err){status.innerText='❌ Не удалось запустить: '+cameraAdvice(err);console.error(err);refreshCameraInfo()}finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}}
 async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;s.tracker?.close?.();s.tracker=null;video.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
 $('startBtn').addEventListener('click',()=>enterMode(false));$('demoBtn').addEventListener('click',()=>enterMode(true));$('exitButton').addEventListener('click',leaveMode);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&s.running)leaveMode()});
@@ -180,7 +232,7 @@ canvas.addEventListener('pointerdown',e=>{if(!s.running)return;e.preventDefault(
 canvas.addEventListener('pointermove',e=>{if(!touchHold||touchHold.id!==e.pointerId)return;const p=touchCoord(e);if(touchHold.target?.drag){const w=touchHold.target.drag,dx=p.x-touchHold.x,dy=p.y-touchHold.y;w.x=clamp(touchHold.ox+dx,0,BASE_W-w.w);w.y=clamp(touchHold.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>10)touchHold.moved=true}});
 function releaseTouch(e){if(!touchHold||touchHold.id!==e.pointerId)return;if(!touchHold.moved&&touchHold.target?.action)touchHold.target.action();if(touchHold.moved)saveLayouts();touchHold=null}
 canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',()=>touchHold=null);
-window.addEventListener('beforeunload',()=>{if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
+window.addEventListener('beforeunload',()=>{stopCameraTest();if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
 </script>
 </body>
 </html>
