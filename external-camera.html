@@ -87,7 +87,7 @@ $('startCamera').onclick=async()=>{
   try{wakeLock=await navigator.wakeLock?.request('screen')}catch{}
   active=true;last=0;frameCount=0;diag('Ищу метку №'+MARKER_ID+'...');
   requestAnimationFrame(loop);
- }catch(e){diag('❌ '+(e?.name||'Error')+': '+(e?.message||e)+'\nИспользуй HTTPS в Chrome и разреши камеру.');console.error(e);stopCamera()}
+ }catch(e){stopCamera();diag('❌ '+(e?.name||'Error')+': '+(e?.message||e)+'\nИспользуй HTTPS в Chrome и разреши камеру.');console.error(e)}
  finally{$('startCamera').disabled=false}
 };
 function loop(now){
