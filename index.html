@@ -175,7 +175,7 @@ $('checkARBtn').addEventListener('click',async()=>{
 });
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','trackSize','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false}};
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false,calibratingUntil:0}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
@@ -332,13 +332,13 @@ function recenterVision(){
   w.y=clamp(w.homeY??w.y,0,BASE_H-w.h);
   w.homeX=w.x;w.homeY=w.y;w.hiddenSpatial=false;
  }
- p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='калибровка';p.visible=true;
+ p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='убери руку • привязка через 1 с';p.visible=true;p.calibratingUntil=performance.now()+850;
  p.awaitingReset=true;if(p.worker)p.worker.postMessage({type:'reset'});else p.awaitingReset=false;
 }
 function startVision(sid){
  const p=s.vision;
  p.enabled=!!s.visionMode;p.ready=false;p.busy=false;p.worker=null;p.awaitingReset=false;
- p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.lastCapture=0;p.lastVideoTime=-1;
+ p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.lastCapture=0;p.lastVideoTime=-1;p.calibratingUntil=performance.now()+650;
  p.quality=0;p.points=0;p.visible=true;p.status='загрузка';
  if(!p.enabled)return;
  if(!window.Worker||!window.createImageBitmap){p.enabled=false;p.status='не поддерживается';return}
@@ -385,7 +385,7 @@ function stopVision(){
  p.busy=false;p.visible=true;p.quality=0;p.points=0;
 }
 function runVision(now){
- const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||!video.videoWidth||video.readyState<2)return;
+ const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||now<p.calibratingUntil||!video.videoWidth||video.readyState<2)return;
  const interval=s.fps&&s.fps<19?195:s.fps&&s.fps<25?140:100;
  if(now-p.lastCapture<interval||video.currentTime===p.lastVideoTime)return;
  p.busy=true;p.lastCapture=now;p.lastVideoTime=video.currentTime;
