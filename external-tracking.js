@@ -168,7 +168,7 @@ function createReceiver(onPose,onStatus){
  }
  return {start,stop,getCode:()=>code,isConnected:()=>!!client?.connected&&connectedCamera};
 }
-function createSender(onStatus){
+function createSender(onStatus,trackingMode='markerless'){
  let client=null,channel=null,epoch=0,peerSeen=false,helloTimer=null,token='';
  const status=str=>{try{onStatus(str)}catch(e){console.warn(e)}};
  function stop(){
@@ -192,7 +192,7 @@ function createSender(onStatus){
    };
    const timeout=setTimeout(()=>fail(Error('Нет связи с MQTT-сервером (14 секунд)')),14000);
    const m=makeClient('cam');client=m;
-   const hello=()=>publishSecure(m,ch.topic+'/vr',ch.key,{type:'hello',tracking:'markerless'});
+   const hello=()=>publishSecure(m,ch.topic+'/vr',ch.key,{type:'hello',tracking:trackingMode==='aruco'?'aruco':'markerless'});
    m.on('connect',()=>{
     if(id!==epoch)return;
     m.subscribe(ch.topic+'/camera',{qos:0},err=>{
