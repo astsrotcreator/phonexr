@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PhoneXR — проверка камеры</title>
+<style>body{background:#071018;color:#e8fbff;font:16px system-ui;padding:18px;max-width:650px;margin:auto}button{border:0;border-radius:12px;background:#66e6db;color:#03272b;font-weight:700;padding:15px;margin:8px 4px 8px 0}video{width:100%;border-radius:12px;background:#000}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;background:#17303b;border-radius:12px;padding:14px}</style>
+</head><body><h1>📷 Проверка камеры</h1><p>Открой на GitHub Pages в Chrome. Кнопка ниже запрашивает камеру без VR и распознавания рук.</p>
+<button id="go">Проверить камеру</button><button id="stop">Остановить</button><pre id="report"></pre><video id="v" autoplay muted playsinline></video>
+<script>
+let stream;
+const report=document.getElementById('report'),v=document.getElementById('v');
+function show(s){report.textContent=s}
+function stop(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;v.pause();v.srcObject=null}
+document.getElementById('stop').onclick=()=>{stop();show('Камера остановлена.')};
+document.getElementById('go').onclick=async()=>{
+ stop();show('Запрашиваю разрешение…');
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('getUserMedia недоступен');
+  stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+  v.srcObject=stream;await v.play();show('✅ Камера работает! Разрешение получено.')
+ }catch(e){show('❌ '+e.name+': '+e.message+'\nПроверь HTTPS, разрешения Chrome и Android.')}
+};
+show('Адрес: '+location.href+'\nБезопасный контекст: '+(isSecureContext?'да':'нет')+'\nAPI камеры: '+(navigator.mediaDevices?.getUserMedia?'да':'нет'));
+</script></body></html>
