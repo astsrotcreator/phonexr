@@ -34,9 +34,14 @@
  .danger{color:#f9a8ad}
  #status{min-height:25px;font-size:13px;color:#b6d6e2;line-height:1.5}
  #screen{position:fixed;inset:0;display:none;background:black;touch-action:none;overflow:hidden}
- #view{display:block;width:100%;height:100%;touch-action:none}
+ #view{position:absolute;inset:0;display:block;width:100%;height:100%;touch-action:none;z-index:1}
+ #screen .video-slot{position:absolute;top:0;width:50%;height:100%;overflow:hidden;display:none;pointer-events:none;background:#000}
+ #screen.camera-active .video-slot{display:block}
+ #screen .video-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;will-change:transform}
+ #screen .video-left{left:0}
+ #screen .video-right{right:0}
  #exitButton{position:absolute;right:5px;top:4px;border-radius:6px;padding:3px 7px;background:rgba(7,20,31,.45);color:#b9d1df;font-size:10px;opacity:.55;z-index:2}
- #video{position:fixed;width:2px;height:2px;opacity:.001;left:-10px;top:-10px;pointer-events:none}
+ 
  #overlayStatus{pointer-events:none;position:absolute;left:50%;transform:translateX(-50%);bottom:2px;z-index:2;color:#cce9ee;background:#09202ab3;padding:2px 8px;border-radius:9px;font-size:10px;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
  .hidden{display:none!important}
  @media (min-width:800px){.setup{padding-top:30px}}
@@ -45,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.3 FPS</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.4 Performance</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -77,8 +82,9 @@
       <div class="setting"><label for="mirror">Зеркальное изображение</label><input type="checkbox" id="mirror"></div>
       <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
+      <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">В v0.3 распознавание руки обычно идёт в отдельном потоке, а FPS интерфейса и время обработки жестов показываются внутри VR. Для максимальной скорости оставь 1.0× или уменьши до 0.8×.</div>
+      <div class="detail">В v0.4 камера выводится отдельно от Canvas. Наверху показываются два FPS: «кам» и «UI». Если всё тормозит, включи тест без распознавания руки.</div>
       <div class="detail">Если окна двоятся в линзах — меняй сведение. Одна камера не создаёт настоящую глубину; при плохом самочувствии немедленно снимай очки.</div>
     </section>
     <section class="card">
@@ -94,13 +100,21 @@
   </div>
 </main>
 <section id="screen" aria-label="Режим VR">
+  <div class="video-slot video-left"><video id="video" autoplay playsinline muted></video></div>
+  <div class="video-slot video-right"><video id="videoRight" autoplay playsinline muted></video></div>
   <canvas id="view"></canvas><button id="exitButton" title="Выйти из VR">✕</button><div id="overlayStatus">Подключение камеры…</div>
 </section>
-<video id="video" autoplay playsinline muted></video>
 <script type="module">
 'use strict';
 const $ = (id) => document.getElementById(id);
-const canvas = $('view'), ctx = canvas.getContext('2d',{alpha:false}), video=$('video');
+const canvas=$('view'),video=$('video'),videoRight=$('videoRight');
+let ctx=canvas.getContext('2d',{alpha:true});
+const uiCanvas=document.createElement('canvas'),uiCtx=uiCanvas.getContext('2d',{alpha:true});
+function updateCameraVisual(){
+ const zoom=s.zoom||1,sx=(s.mirror?-zoom:zoom);
+ const transform='scale('+sx+','+zoom+')';
+ video.style.transform=transform;videoRight.style.transform=transform;
+}
 const status=$('status'), os=$('overlayStatus');
 let previewStream=null;
 function cameraAdvice(err){
@@ -135,14 +149,14 @@ $('testCameraBtn').addEventListener('click',async()=>{
 $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
-for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
-function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';saveSettings()}
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';updateCameraVisual();saveSettings()}
 for(const key of SETTING_KEYS)$(key).addEventListener('input',syncSettings);
 syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
@@ -181,18 +195,36 @@ function drawHand(){if(!s.hand||performance.now()-s.handSeen>650)return;
  if(s.showSkeleton&&s.hand.landmarks){const pts=s.hand.landmarks.map(pointToScreen);ctx.lineWidth=4;ctx.strokeStyle='rgba(122,255,231,.73)';for(const [a,b] of HAND_LINES){if(!pts[a]||!pts[b])continue;ctx.beginPath();ctx.moveTo(pts[a].x,pts[a].y);ctx.lineTo(pts[b].x,pts[b].y);ctx.stroke()}for(let i=0;i<pts.length;i++){const p=pts[i];rrect(p.x-4,p.y-4,8,8,4,'#cffdf3')}}
  const {x,y}=s.hand;ctx.beginPath();ctx.arc(x,y,s.pinching?26:20,0,Math.PI*2);ctx.fillStyle=s.pinching?'rgba(87,250,218,.30)':'rgba(130,235,255,.13)';ctx.fill();ctx.lineWidth=5;ctx.strokeStyle=s.pinching?'#fff5a4':'#a5ffff';ctx.stroke();ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);ctx.fillStyle='#fbffff';ctx.fill();
 }
-function renderEye(eye,eyeW,h){ctx.save();ctx.beginPath();ctx.rect(eye*eyeW,0,eyeW,h);ctx.clip();ctx.translate(eye*eyeW,0);ctx.scale(eyeW/BASE_W,h/BASE_H);drawCamera(eye);ctx.save();ctx.translate(eye===0?s.eyeShift:-s.eyeShift,0);
- regions=[];for(const w of windows)drawWindow(w);
- drawHand();ctx.restore();
- const grad=ctx.createRadialGradient(BASE_W/2,BASE_H/2,130,BASE_W/2,BASE_H/2,700);grad.addColorStop(0,'#0000');grad.addColorStop(.8,'#00000020');grad.addColorStop(1,'#0000009a');ctx.fillStyle=grad;ctx.fillRect(0,0,BASE_W,BASE_H);
- text('PHONE XR  •  '+(s.demo?'ДЕМО':s.cameraStatus)+'  •  '+(s.fps||'…')+' FPS  •  РУКА '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),26,35,20,'#e4fbff',650);
- if(s.hand&&performance.now()-s.handSeen<650)text(s.pinching?'ЩИПОК':'РУКА В КАДРЕ',BASE_W/2,665,21,'#d3fff5',650,'center');else text('Покажи ладонь перед камерой',BASE_W/2,665,20,'#c1dbe5',600,'center');
- ctx.restore();}
+function drawUIAtlas(){
+ // Render interface once at a lower resolution. Duplicate that texture for both eyes.
+ const scale=clamp((s.renderScale||1)*.72,.5,1);
+ const w=Math.round(BASE_W*scale),height=Math.round(BASE_H*scale);
+ if(uiCanvas.width!==w||uiCanvas.height!==height){uiCanvas.width=w;uiCanvas.height=height}
+ const screenCtx=ctx;ctx=uiCtx;
+ try{
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,w,height);
+  ctx.setTransform(w/BASE_W,0,0,height/BASE_H,0,0);
+  if(s.demo)drawCamera(0);
+  regions=[];for(const win of windows)drawWindow(win);
+  drawHand();
+  text('XR  •  кам '+(s.cameraFps||'…')+'  •  UI '+(s.fps||'…')+' FPS  •  рука '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),20,34,18,'#e4fbff',650);
+  if(s.hand&&performance.now()-s.handSeen<650)text(s.pinching?'ЩИПОК':'РУКА В КАДРЕ',BASE_W/2,665,19,'#d3fff5',650,'center');
+  else if(!s.disableTracking)text('Покажи ладонь перед камерой',BASE_W/2,665,19,'#c1dbe5',600,'center');
+ }finally{ctx=screenCtx}
+}
+function renderEye(eye,eyeW,h){
+ ctx.save();ctx.beginPath();ctx.rect(eye*eyeW,0,eyeW,h);ctx.clip();
+ ctx.translate(eye*eyeW+(eye===0?s.eyeShift:-s.eyeShift)*eyeW/BASE_W,0);
+ ctx.drawImage(uiCanvas,0,0,eyeW,h);
+ ctx.restore();
+}
 function fit(){const ratio=clamp(s.renderScale||1,.7,1.5);const w=innerWidth,h=innerHeight;const cw=Math.max(2,Math.floor(w*ratio)),ch=Math.max(2,Math.floor(h*ratio));if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch}}
 window.addEventListener('resize',fit);fit();
 function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);if(s.timerRunning){const elapsed=(now-s.timerLast)/1000;s.timerLast=now;s.timerRemaining=Math.max(0,s.timerRemaining-elapsed);if(s.timerRemaining<=0)s.timerRunning=false}
- if(!s.lastDraw||now-s.lastDraw>15){
-  const ww=canvas.width/2;renderEye(0,ww,canvas.height);renderEye(1,ww,canvas.height);
+ if(!s.lastDraw||now-s.lastDraw>31){
+  drawUIAtlas();
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+   const ww=canvas.width/2;renderEye(0,ww,canvas.height);renderEye(1,ww,canvas.height);
   ctx.fillStyle='#07151c';ctx.fillRect(ww-2,0,4,canvas.height);
   s.lastDraw=now;s.drawCount++;
   if(!s.fpsStarted)s.fpsStarted=now;
@@ -275,12 +307,12 @@ function loadHandTracking(sessionId){
 function runTracking(now){
  if(!video.videoWidth||video.readyState<2)return;
  if(s.workerReady&&s.worker){
-  if(s.trackingBusy||now-s.lastDetected<(s.lowPower?150:85))return;
+  if(s.trackingBusy||now-s.lastDetected<(s.lowPower?260:150))return;
   if(video.currentTime===s.lastVideoTime)return;
   s.lastDetected=now;s.lastVideoTime=video.currentTime;s.trackingBusy=true;
   const sid=s.sessionId,worker=s.worker;
   try{
-   const w=s.lowPower?320:480,h=s.lowPower?180:270;
+   const w=s.lowPower?256:320,h=s.lowPower?144:180;
    if(trackCanvas.width!==w){trackCanvas.width=w;trackCanvas.height=h}
    trackCtx.drawImage(video,0,0,w,h);
    createImageBitmap(trackCanvas).then(bitmap=>{
@@ -292,7 +324,7 @@ function runTracking(now){
   return;
  }
  if(!s.tracker)return;
- if(now-s.lastDetected<(s.lowPower?220:130))return;
+ if(now-s.lastDetected<(s.lowPower?480:290))return;
  if(video.currentTime===s.lastVideoTime)return;
  s.lastDetected=now;s.lastVideoTime=video.currentTime;
  try{
@@ -305,22 +337,61 @@ function runTracking(now){
   os.textContent='Ошибка распознавания руки • можно пользоваться касаниями';
  }
 }
-async function enterMode(demo){if(s.running)return;stopCameraTest();const sessionId=++s.sessionId;syncSettings();status.textContent='Открываю камеру…';$('startBtn').disabled=true;$('demoBtn').disabled=true;try{
- if(!demo){
-  if(!navigator.mediaDevices?.getUserMedia)throw Error('Камера недоступна: открой HTTPS-сайт в Chrome.');
-  let stream;
-  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},frameRate:{ideal:30,max:30}}})}
-  catch(e){if(['OverconstrainedError','NotFoundError'].includes(e?.name))stream=await navigator.mediaDevices.getUserMedia({audio:false,video:true});else throw e}
-  video.srcObject=stream;
-  try{await video.play()}catch(e){stream.getTracks().forEach(t=>t.stop());video.srcObject=null;throw e}
-  s.cameraStatus='КАМЕРА';
- }
- else s.cameraStatus='ДЕМО';s.demo=demo;s.trackerStatus=demo?'выкл':'загрузка';s.running=true;initialWindows();s.timerLast=performance.now();s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;fit();$('setup').classList.add('hidden');$('screen').style.display='block';fit();
- try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
- try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
- os.textContent=demo?'Демо: управляй окнами касанием экрана':'Камера запущена • загружаю распознавание руки';requestAnimationFrame(render);if(!demo)loadHandTracking(sessionId);}
- catch(err){status.innerText='❌ Не удалось запустить: '+cameraAdvice(err);console.error(err);refreshCameraInfo()}finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}}
-async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;closeTracker();video.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
+function watchCameraFPS(sessionId){
+ s.cameraFps=0;s.cameraFrames=0;s.cameraFpsStarted=0;
+ if(typeof video.requestVideoFrameCallback!=='function')return;
+ const onFrame=(now)=>{
+  if(sessionId!==s.sessionId||!s.running)return;
+  if(!s.cameraFpsStarted)s.cameraFpsStarted=now;
+  s.cameraFrames++;
+  if(now-s.cameraFpsStarted>1000){
+   s.cameraFps=Math.round(s.cameraFrames*1000/(now-s.cameraFpsStarted));
+   s.cameraFrames=0;s.cameraFpsStarted=now;
+  }
+  video.requestVideoFrameCallback(onFrame);
+ };
+ video.requestVideoFrameCallback(onFrame);
+}
+async function enterMode(demo){
+ if(s.running)return;
+ stopCameraTest();const sessionId=++s.sessionId;
+ syncSettings();status.textContent='Открываю камеру…';
+ $('startBtn').disabled=true;$('demoBtn').disabled=true;
+ const screen=$('screen');
+ try{
+  // Keep videos in the document's visible layout while starting the streams.
+  screen.style.display='block';
+  if(!demo){
+   if(!navigator.mediaDevices?.getUserMedia)throw Error('Камера недоступна: открой HTTPS-сайт в Chrome.');
+   let stream;
+   try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480},frameRate:{ideal:30,max:30}}})}
+   catch(e){if(['OverconstrainedError','NotFoundError'].includes(e?.name))stream=await navigator.mediaDevices.getUserMedia({audio:false,video:true});else throw e}
+   video.srcObject=stream;videoRight.srcObject=stream;updateCameraVisual();
+   screen.classList.add('camera-active');
+   try{await Promise.all([video.play(),videoRight.play()])}
+   catch(e){
+    stream.getTracks().forEach(t=>t.stop());
+    video.srcObject=null;videoRight.srcObject=null;throw e;
+   }
+   s.cameraStatus='КАМЕРА';
+  }else{s.cameraStatus='ДЕМО';screen.classList.remove('camera-active')}
+  s.demo=demo;s.trackerStatus=demo?'выкл':(s.disableTracking?'отключено':'загрузка');
+  s.running=true;initialWindows();s.timerLast=performance.now();
+  s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;
+  $('setup').classList.add('hidden');fit();
+  try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
+  try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
+  os.textContent=demo?'Демо: управление касаниями':(s.disableTracking?'Тест скорости: жесты отключены':'Камера отдельно от интерфейса • загружаю распознавание');
+  if(!demo)watchCameraFPS(sessionId);
+  requestAnimationFrame(render);
+  if(!demo&&!s.disableTracking)loadHandTracking(sessionId);
+ }catch(err){
+  screen.classList.remove('camera-active');screen.style.display='none';
+  status.innerText='❌ Не удалось запустить: '+cameraAdvice(err);
+  console.error(err);refreshCameraInfo();
+ }finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}
+}
+async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;closeTracker();video.pause();videoRight.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}videoRight.srcObject=null;$('screen').classList.remove('camera-active');try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
 $('startBtn').addEventListener('click',()=>enterMode(false));$('demoBtn').addEventListener('click',()=>enterMode(true));$('exitButton').addEventListener('click',leaveMode);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&s.running)leaveMode()});
 let touchHold=null;function touchCoord(e){const r=canvas.getBoundingClientRect();const x=e.clientX-r.left, y=e.clientY-r.top;const eye=(x>=r.width/2)?1:0;return {x:((x-eye*r.width/2)/(r.width/2))*BASE_W-(eye===0?s.eyeShift:-s.eyeShift),y:(y/r.height)*BASE_H}}
