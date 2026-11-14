@@ -13,7 +13,7 @@ small{color:#afc4cc}
 <h1>📡 PhoneXR — камера Redmi 9</h1>
 <p><b>Без метки, без креплений, без ПК.</b> Redmi 9 будет видеть тебя со стороны и примерно отслеживать положение головы и плеч. Направление взгляда такая система не знает.</p>
 <section class="card"><h2>1. Соединить телефоны</h2>
-<p>На Redmi 13 в PhoneXR включи <b>«Внешняя камера без метки»</b>, затем нажми <b>«Создать код»</b>. Введи код сюда.</p>
+<p>На Redmi 13 в PhoneXR включи <b>«Использовать внешнюю камеру Redmi 9»</b> и <b>«Без метки»</b>, затем нажми <b>«Создать код»</b>. Введи код сюда.</p>
 <input id="code" maxlength="12" placeholder="КОД С REDMI 13" autocomplete="off" spellcheck="false">
 <button id="connect">Соединить с PhoneXR</button>
 <p id="connection">Ожидание подключения.</p></section>
@@ -26,40 +26,35 @@ small{color:#afc4cc}
 <section class="card"><h2>Как проверить</h2>
 <p>Не надевая VR-очки, встань или сядь перед Redmi 9, затем медленно смещайся влево и вправо. Убедись, что на изображении видны точки головы и плеч. На Redmi 13 нажми «ЦЕНТР» и посмотри, как меняются окна.</p>
 <p><b>Ограничение:</b> внешняя камера определяет положение фигуры в кадре, а не координаты очков с точностью AR/VR. Если ты повернёшься спиной или выйдешь из кадра, трекинг может пропасть.</p></section>
-<small>Видео обрабатывается локально на Redmi 9. На Redmi 13 через WebRTC отправляются только измерения позы, а не видеокадры. Первичное подключение требует интернета. Это эксперимент — не используй приложение для передвижения в очках.</small>
+<small>Видео обрабатывается локально на Redmi 9. На Redmi 13 через защищённый MQTT (WSS, шифрование координат AES-GCM) передаются только измерения позы, а не видеокадры. Сервер MQTT публичный и экспериментальный; требуется интернет. Это эксперимент — не используй приложение для передвижения в очках.</small>
 </main>
 <video id="camera" autoplay muted playsinline style="position:absolute;width:1px;height:1px;left:-30px;opacity:.01;pointer-events:none"></video>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="./external-tracking.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const v=$('camera'),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
-let peer=null,conn=null,stream=null,worker=null,ready=false,busy=false,active=false,lastFrame=0,frameCount=0;
+let sender=null,stream=null,worker=null,ready=false,busy=false,active=false,lastFrame=0,frameCount=0;
 let body=null,missingFrames=0,lastSent=0,wake=null,runId=0,lastPaint=0;
 const status=t=>$('status').textContent=t, connection=t=>$('connection').textContent=t;
-function disconnect(){try{conn?.close()}catch{}try{peer?.destroy()}catch{}conn=null;peer=null}
-$('connect').onclick=()=>{
- const code=$('code').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
- if(code.length<6){connection('Введи код из PhoneXR.');return}
- if(typeof Peer!=='function'){connection('Не загрузился PeerJS. Проверь интернет.');return}
- disconnect();connection('Связываюсь...');
- peer=new Peer(undefined,{debug:1});
- const local=peer;
- local.on('open',()=>{
-  if(peer!==local)return;
-  conn=peer.connect('phonexr-'+code,{serialization:'json',reliable:false});
-  const current=conn;
-  connection('Ищу Redmi 13...');
-  current.on('open',()=>{
-   if(conn!==current)return;
-   connection('✅ Соединено с Redmi 13!');
-   current.send({type:'hello',role:'redmi9-pose',tracking:'markerless'});
-  });
-  current.on('close',()=>{if(conn===current){conn=null;connection('Связь потеряна. Подключи заново.')}});
-  current.on('error',e=>connection('Ошибка соединения: '+(e?.message||e)));
- });
- local.on('error',e=>connection('Ошибка PeerJS: '+(e?.message||e)));
+function disconnect(){try{sender?.stop()}catch{}sender=null}
+$('connect').onclick=async()=>{
+ const code=$('code').value.trim();
+ const button=$('connect');
+ if(!window.ExternalTracking?.createSender){
+  connection('Не загрузился модуль MQTT. Обнови страницу.');return;
+ }
+ button.disabled=true;
+ disconnect();connection('Подключаюсь к серверу MQTT...');
+ try{
+  sender=window.ExternalTracking.createSender(connection);
+  await sender.connect(code);
+ }catch(err){
+  connection('❌ Подключение не удалось: '+String(err?.message||err)+
+   '. Проверь код, интернет и Wi-Fi. Перезагрузи обе страницы.');
+  console.error('MQTT connection failed:',err);
+ }finally{button.disabled=false}
 };
-function send(data){if(conn?.open){try{conn.send(data)}catch(e){console.warn('WebRTC send failed',e)}}}
+function send(data){sender?.send(data)}
 function stopCamera(){
  ++runId;active=false;ready=false;busy=false;
  try{worker?.terminate()}catch{}worker=null;
@@ -92,7 +87,7 @@ $('start').onclick=async()=>{
      status('✅ ТЕЛО ВИДНО • '+body.quality+'\nГолова x '+body.x.toFixed(3)+' • y '+body.y.toFixed(3)+
        '\nПлечи: '+Math.round(body.width*100)+'% ширины кадра'+
        '\nИИ: '+data.processingMs+' мс • измерений '+frameCount+
-       '\nWebRTC: '+(conn?.open?'подключён':'не подключён'));
+       '\nСвязь: '+(sender?.isConnected()?'подключён':'не подключён'));
     }else{
      if(++missingFrames>=2){send({type:'lost',reason:'body-not-found'});missingFrames=0}
      status('⚠️ Человек не обнаружен. Отойди от камеры, чтобы плечи и корпус были видны.');
