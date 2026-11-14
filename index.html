@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.11 Scene Anchors</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.12 Dual Phone Tracking</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -87,7 +87,7 @@
 <div class="setting"><label for="trackSize">Качество распознавания руки <b id="trackSizeText">224px</b></label><input type="range" id="trackSize" min="160" max="320" step="32" value="224"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">v0.11: камера запоминает исходные детали в момент привязки. Если ты отвернёшься и ориентиры исчезнут, окно пропадёт из кадра. При возвращении камера попытается найти те же детали и восстановить окно. Это экспериментальная 2D-привязка, не SLAM и не безопасный AR для ходьбы.</div>
+      <div class="detail">v0.12: добавлен экспериментальный внешний трекинг с Redmi 9 и квадратной меткой ArUco на очках. Для первой проверки нужен хороший обзор метки с одного места, без ходьбы.</div>
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
@@ -97,7 +97,16 @@
       <div class="detail" id="arDiagnostic" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">Нажми проверку.</div>
     </section>
     <section class="card">
-      <h2>04 / Твоя заметка</h2>
+      <h2>04 / Внешняя камера Redmi 9</h2>
+      <div class="setting"><label for="externalMode">Использовать внешний трекинг по метке</label><input type="checkbox" id="externalMode"></div>
+      <p class="detail">Вторая камера неподвижно наблюдает за очками и передаёт приблизительные координаты по WebRTC. Потребуется квадратная метка ArUco №347 на внешней стороне оправы. Это экспериментальная система, не безопасная навигация.</p>
+      <button id="pairExternalBtn" class="secondary" type="button">📡 Создать код для Redmi 9</button>
+      <div id="externalPairCode" style="font-size:27px;letter-spacing:.12em;font-family:monospace;font-weight:800;margin:13px 0;overflow-wrap:anywhere">—</div>
+      <div id="externalPairStatus" class="detail" role="status">Внешняя камера не подключена</div>
+      <p class="detail"><a href="./external-camera.html" target="_blank" rel="noopener" style="color:#71ebdf">Открыть камеру на Redmi 9</a> · <a href="./marker.html" target="_blank" rel="noopener" style="color:#71ebdf">Открыть метку №347</a></p>
+    </section>
+    <section class="card">
+      <h2>05 / Твоя заметка</h2>
       <textarea class="field" id="noteText" rows="2" maxlength="220" placeholder="Текст, который будет показан в виртуальном окне">Мой первый виртуальный рабочий стол 👋</textarea>
       <div class="detail">Текст можно изменить здесь до запуска. Настройки и заметка сохраняются в браузере.</div>
     </section>
@@ -113,6 +122,7 @@
   <div class="video-slot video-right"><video id="videoRight" autoplay playsinline muted></video></div>
   <canvas id="view"></canvas><button id="exitButton" title="Выйти из VR">✕</button><div id="overlayStatus">Подключение камеры…</div>
 </section>
+<script src="./external-tracking.js"></script>
 <script type="module">
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -174,27 +184,33 @@ $('checkARBtn').addEventListener('click',async()=>{
  $('arDiagnostic').textContent=info.join('\\n');
 });
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','trackSize','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false,calibratingUntil:0}};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','externalMode','trackSize','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false,calibratingUntil:0},externalMode:false,external:{receiver:null,pose:null,lastPoseAt:0,calibrated:false,received:0,status:'не подключено',code:'',lastFrameAt:0}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
-for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
-function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.visionMode=$('visionMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.visionMode=$('visionMode').checked;s.externalMode=$('externalMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
 for(const key of SETTING_KEYS){
- if(key==='visionMode'||key==='spatialMode')continue;
+ if(key==='visionMode'||key==='spatialMode'||key==='externalMode')continue;
  $(key).addEventListener('input',syncSettings);
 }
 $('visionMode').addEventListener('input',()=>{
- if($('visionMode').checked)$('spatialMode').checked=false;
+ if($('visionMode').checked){$('spatialMode').checked=false;$('externalMode').checked=false}
  syncSettings();
 });
 $('spatialMode').addEventListener('input',()=>{
- if($('spatialMode').checked)$('visionMode').checked=false;
+ if($('spatialMode').checked){$('visionMode').checked=false;$('externalMode').checked=false}
  syncSettings();
 });
-if($('visionMode').checked&&$('spatialMode').checked)$('spatialMode').checked=false;
+$('externalMode').addEventListener('input',()=>{
+ if($('externalMode').checked){$('visionMode').checked=false;$('spatialMode').checked=false}
+ syncSettings();
+});
+if($('externalMode').checked){$('visionMode').checked=false;$('spatialMode').checked=false}
+else if($('visionMode').checked&&$('spatialMode').checked)$('spatialMode').checked=false;
+syncSettings();
 syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
 const appInfo={launcher:{title:'PHONE XR',icon:'◈'},clock:{title:'Часы',icon:'◷'},timer:{title:'Таймер',icon:'◴'},note:{title:'Заметка',icon:'▤'},counter:{title:'Счётчик',icon:'⊕'},help:{title:'Помощь',icon:'✌'},settings:{title:'Оптика',icon:'⚙'}};
