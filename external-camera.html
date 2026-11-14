@@ -35,11 +35,11 @@ small{color:#aec6d1}.status{color:#a8ffde;font-weight:700}
 <small>Связь WebRTC PeerJS требует интернет для первоначального соединения. После установки соединения координаты передаются напрямую между телефонами, если это позволяет сеть. Никакой доступ к комнате извне не предоставляется.</small>
 </main>
 <video id="camera" autoplay muted playsinline style="position:absolute;width:1px;height:1px;opacity:.01;left:-10px"></video>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="./external-tracking.js?v=14"></script>
 <script>
 const $=id=>document.getElementById(id);
 const video=$('camera'),canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
-let peer=null,conn=null,stream=null,detector=null,posit=null,active=false,last=0,lastLost=0,lastSeen=0,frameCount=0,markerReady=false,wakeLock=null;
+let sender=null,stream=null,detector=null,posit=null,active=false,last=0,lastLost=0,lastSeen=0,frameCount=0,markerReady=false,wakeLock=null;
 const MARKER_ID=347,MARKER_SIZE_MM=100;
 const setConnection=text=>$('connection').textContent=text;
 const diag=text=>$('diagnostics').textContent=text;
@@ -52,23 +52,19 @@ async function loadArUco(){
  if(typeof AR==='undefined'||typeof POS==='undefined')throw Error('Библиотека распознавания не запустилась');
  detector=new AR.Detector();posit=new POS.Posit(MARKER_SIZE_MM,320);markerReady=true;
 }
-function closePeer(){try{conn?.close()}catch{}try{peer?.destroy()}catch{}conn=peer=null}
-$('connectBtn').onclick=()=>{
- const code=$('pairCode').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
- if(code.length<6){setConnection('Введи код из PhoneXR (не менее 6 символов).');return}
- if(typeof Peer!=='function'){setConnection('Не загрузился PeerJS. Проверь интернет.');return}
- closePeer();setConnection('Подключаюсь...');
- peer=new Peer(undefined,{debug:1});
- peer.on('open',()=>{if(!peer)return;
-  setConnection('Ищу PhoneXR с кодом '+code+'...');
-  conn=peer.connect('phonexr-'+code,{serialization:'json',reliable:false});
-  conn.on('open',()=>{setConnection('✅ Соединено с PhoneXR');conn.send({type:'hello',role:'redmi9',marker:MARKER_ID})});
-  conn.on('close',()=>setConnection('Соединение разорвано. Подключи снова.'));
-  conn.on('error',e=>setConnection('Ошибка связи: '+(e?.message||e)));
- });
- peer.on('error',e=>setConnection('Ошибка PeerJS: '+(e?.message||e)));
+function closePeer(){try{sender?.stop()}catch{}sender=null}
+$('connectBtn').onclick=async()=>{
+ const code=$('pairCode').value.trim();
+ const btn=$('connectBtn');
+ btn.disabled=true;closePeer();setConnection('Подключаю MQTT...');
+ try{
+  if(!window.ExternalTracking?.createSender)throw Error('Модуль связи не загрузился. Обнови страницу.');
+  sender=window.ExternalTracking.createSender(setConnection,'aruco');
+  await sender.connect(code);
+ }catch(e){setConnection('❌ '+String(e?.message||e)+' • Обнови обе страницы и создай новый код');console.error(e)}
+ finally{btn.disabled=false}
 };
-function send(data){if(conn?.open){try{conn.send(data)}catch(e){console.warn('Send',e)}}}
+function send(data){sender?.send(data)}
 function stopCamera(){
  active=false;
  if(stream){for(const t of stream.getTracks())t.stop();stream=null}
@@ -116,7 +112,7 @@ function loop(now){
     diag('✅ МЕТКА ВИДНА | ID '+MARKER_ID+'\n'+
       'Положение в мм (оценка): x '+Math.round(t[0])+' • y '+Math.round(t[1])+' • z '+Math.round(t[2])+
       '\nПогрешность модели: '+msg.err+' px • Обработка '+Math.round(performance.now()-started)+' ms'+
-      '\nПередано пакетов: '+frameCount+' • WebRTC: '+(conn?.open?'связь есть':'нет связи'));
+      '\nПередано пакетов: '+frameCount+' • WebRTC: '+(sender?.isConnected()?'связь есть':'нет связи'));
    }else diag('Метка видна, но оценка позы ненадёжна. Поверни метку к камере.');
   }else{
    diag('⚠️ Метка №'+MARKER_ID+' не обнаружена.\nПокажи квадрат в камеру, без бликов.\nWebRTC: '+(conn?.open?'связь есть':'нет связи'));
