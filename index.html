@@ -247,7 +247,8 @@ function smoothHandVisual(now){
  if(!target||now-s.handSeen>650){s.visualHand=null;s.lastVisualUpdate=now;return}
  const dt=clamp(now-(s.lastVisualUpdate||now),1,80);
  s.lastVisualUpdate=now;
- const alpha=1-Math.exp(-dt/80);
+ const jump=s.visualHand?Math.hypot(target.x-s.visualHand.x,target.y-s.visualHand.y):0;
+ const alpha=clamp(1-Math.exp(-dt/(jump>120?14:jump>40?22:35)),.2,.94);
  if(!s.visualHand||!target.landmarks?.length){
   s.visualHand={x:target.x,y:target.y,landmarks:target.landmarks?.map(p=>({x:p.x,y:p.y,z:p.z}))||null};
   return;
@@ -287,6 +288,11 @@ function drawUIAtlas(){
   ctx.setTransform(w/BASE_W,0,0,height/BASE_H,0,0);
   if(s.demo)drawCamera(0);
   regions=[];for(const win of windows)drawWindow(win);
+  if(s.spatial.enabled){
+   activeDrawWin=null;
+   actionRect(760,595,220,72,'⟳ ЦЕНТР',recenterSpatial,'primary',25);
+   text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR 3DoF • гироскоп':'AR • датчик недоступен',BASE_W/2,82,20,'#91fff3',700,'center');
+  }
   drawHand();
   text('XR • кам '+(s.cameraFps||'…')+' • UI '+(s.fps||'…')+' • ИИ/с '+(s.handDetectFPS||'…')+' • '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),20,34,17,'#e4fbff',650);
   if(s.hand&&performance.now()-s.handSeen<650)text(s.pinching?'ЩИПОК':'РУКА В КАДРЕ',BASE_W/2,665,19,'#d3fff5',650,'center');
@@ -304,6 +310,7 @@ window.addEventListener('resize',fit);fit();
 function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);if(s.timerRunning){const elapsed=(now-s.timerLast)/1000;s.timerLast=now;s.timerRemaining=Math.max(0,s.timerRemaining-elapsed);if(s.timerRemaining<=0)s.timerRunning=false}
  if(!s.lastDraw||now-s.lastDraw>31){
   smoothHandVisual(now);
+  projectSpatial();
   drawUIAtlas();
    ctx.clearRect(0,0,canvas.width,canvas.height);
    const ww=canvas.width/2;renderEye(0,ww,canvas.height);renderEye(1,ww,canvas.height);
@@ -317,9 +324,9 @@ function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);
  }
  if(s.hand&&now-s.handSeen>650){if(s.pinching)endPinch();s.hand=null;s.pinching=false}
  requestAnimationFrame(render)}
-function hit(x,y){for(let i=windows.length-1;i>=0;i--){const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
+function hit(x,y){if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
 function beginPinch(){if(!s.hand)return;const target=hit(s.hand.x,s.hand.y);if(!target){s.hold=null;return}const w=target.win;if(w){windows.splice(windows.indexOf(w),1);windows.push(w)}s.hold={target,initX:s.hand.x,initY:s.hand.y,ox:w?.x,oy:w?.y,moved:false}}
-function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true}
+function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true;updateSpatialDrag(w)}
 function endPinch(){const h=s.hold;s.hold=null;if(!h)return;if(!h.moved&&h.target.action){h.target.action()}else if(h.moved)saveLayouts()}
 function setHand(landmarks){
  const now=performance.now();
@@ -473,7 +480,7 @@ function watchCameraFPS(sessionId){
 async function enterMode(demo){
  if(s.running)return;
  stopCameraTest();const sessionId=++s.sessionId;
- syncSettings();status.textContent='Открываю камеру…';
+ syncSettings();await beginSpatial();status.textContent='Открываю камеру…';
  $('startBtn').disabled=true;$('demoBtn').disabled=true;
  const screen=$('screen');
  try{
@@ -504,17 +511,17 @@ async function enterMode(demo){
   requestAnimationFrame(render);
   if(!demo&&!s.disableTracking)loadHandTracking(sessionId);
  }catch(err){
-  screen.classList.remove('camera-active');screen.style.display='none';
+  stopSpatial();screen.classList.remove('camera-active');screen.style.display='none';
   status.innerText='❌ Не удалось запустить: '+cameraAdvice(err);
   console.error(err);refreshCameraInfo();
  }finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}
 }
-async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;s.visualHand=null;closeTracker();video.pause();videoRight.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}videoRight.srcObject=null;$('screen').classList.remove('camera-active');try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
+async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;s.visualHand=null;stopSpatial();closeTracker();video.pause();videoRight.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}videoRight.srcObject=null;$('screen').classList.remove('camera-active');try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
 $('startBtn').addEventListener('click',()=>enterMode(false));$('demoBtn').addEventListener('click',()=>enterMode(true));$('exitButton').addEventListener('click',leaveMode);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&s.running)leaveMode()});
 let touchHold=null;function touchCoord(e){const r=canvas.getBoundingClientRect();const x=e.clientX-r.left, y=e.clientY-r.top;const eye=(x>=r.width/2)?1:0;return {x:((x-eye*r.width/2)/(r.width/2))*BASE_W-(eye===0?s.eyeShift:-s.eyeShift),y:(y/r.height)*BASE_H}}
 canvas.addEventListener('pointerdown',e=>{if(!s.running)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);const p=touchCoord(e),target=hit(p.x,p.y);if(target?.win){windows.splice(windows.indexOf(target.win),1);windows.push(target.win)}touchHold={id:e.pointerId,target,x:p.x,y:p.y,ox:target?.win?.x,oy:target?.win?.y,moved:false}});
-canvas.addEventListener('pointermove',e=>{if(!touchHold||touchHold.id!==e.pointerId)return;const p=touchCoord(e);if(touchHold.target?.drag){const w=touchHold.target.drag,dx=p.x-touchHold.x,dy=p.y-touchHold.y;w.x=clamp(touchHold.ox+dx,0,BASE_W-w.w);w.y=clamp(touchHold.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>10)touchHold.moved=true}});
+canvas.addEventListener('pointermove',e=>{if(!touchHold||touchHold.id!==e.pointerId)return;const p=touchCoord(e);if(touchHold.target?.drag){const w=touchHold.target.drag,dx=p.x-touchHold.x,dy=p.y-touchHold.y;w.x=clamp(touchHold.ox+dx,0,BASE_W-w.w);w.y=clamp(touchHold.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>10)touchHold.moved=true;updateSpatialDrag(w)}});
 function releaseTouch(e){if(!touchHold||touchHold.id!==e.pointerId)return;if(!touchHold.moved&&touchHold.target?.action)touchHold.target.action();if(touchHold.moved)saveLayouts();touchHold=null}
 canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',()=>touchHold=null);
 window.addEventListener('beforeunload',()=>{stopCameraTest();if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
