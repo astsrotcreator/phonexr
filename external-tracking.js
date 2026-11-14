@@ -28,205 +28,290 @@ function project(pose,world){
  const fX=1000/(2*Math.tan(62*Math.PI/360)),fY=700/(2*Math.tan(45*Math.PI/360));
  return {visible:true,x:500+v[0]/-v[2]*fX,y:350-v[1]/-v[2]*fY};
 }
-// MQTT over WSS is used as the default transport. No PeerJS signaling is needed.
-const MQTT_URL='wss://broker.emqx.io:8084/mqtt';
-const MQTT_CDN=[
- 'https://cdn.jsdelivr.net/npm/mqtt@5.10.3/dist/mqtt.min.js',
- 'https://unpkg.com/mqtt@5.10.3/dist/mqtt.min.js'
+
+/*
+ * Native MQTT 3.1.1 over secure WebSocket — no external JS dependencies.
+ * Both public brokers run in parallel. No server can read payloads: AES-GCM
+ * with a key derived from a short-lived shared code.
+ * This is an experimental/demo channel, not an authenticated service.
+ */
+const PX_BROKERS=[
+ {name:'EMQX',url:'wss://broker.emqx.io:8084/mqtt'},
+ {name:'Mosquitto',url:'wss://test.mosquitto.org:8081'}
 ];
-let mqttLoading=null;
-async function ensureMQTT(){
- if(window.mqtt?.connect)return window.mqtt;
- if(mqttLoading)return mqttLoading;
- mqttLoading=(async()=>{
-  let lastError;
-  for(const src of MQTT_CDN){
-   try{
-    await new Promise((resolve,reject)=>{
-     const script=document.createElement('script');script.src=src;script.async=true;
-     script.onload=resolve;script.onerror=()=>reject(Error('Не загрузилась библиотека MQTT: '+src));
-     document.head.appendChild(script);
-    });
-    if(window.mqtt?.connect)return window.mqtt;
-    throw Error('MQTT.js загружен без глобальной функции connect');
-   }catch(e){lastError=e}
-  }
-  throw lastError||Error('MQTT.js недоступен');
- })();
- try{return await mqttLoading}finally{mqttLoading=null}
-}
-function bytesToHex(bytes){return [...bytes].map(n=>n.toString(16).padStart(2,'0')).join('')}
-function freshCode(){
- const random=new Uint8Array(6);crypto.getRandomValues(random);
- return bytesToHex(random);
-}
-function normalizeCode(value){
- const str=String(value||'').trim().toLowerCase().replace(/[^a-f0-9]/g,'');
- if(!/^[0-9a-f]{12}$/.test(str))throw Error('Код должен состоять из 12 символов (0–9, A–F)');
- return str;
-}
-function bytesToBase64(bytes){
- let chars='';for(const n of bytes)chars+=String.fromCharCode(n);
- return btoa(chars);
-}
-function base64ToBytes(str){
- const raw=atob(str),bytes=new Uint8Array(raw.length);
- for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
- return bytes;
-}
 const encoder=new TextEncoder(),decoder=new TextDecoder();
-async function channelFromCode(code){
- const a=await crypto.subtle.digest('SHA-256',encoder.encode('phonexr-v14-mqtt-topic:'+code));
- const b=await crypto.subtle.digest('SHA-256',encoder.encode('phonexr-v14-mqtt-key:'+code));
- const topic='phonexr/v14/'+bytesToHex(new Uint8Array(a)).slice(0,26);
- const key=await crypto.subtle.importKey('raw',b,'AES-GCM',false,['encrypt','decrypt']);
- return {topic,key};
+function hex(bytes){return [...bytes].map(n=>n.toString(16).padStart(2,'0')).join('')}
+function freshCode(){return hex(crypto.getRandomValues(new Uint8Array(6)))}
+function normalizeCode(v){
+ const code=String(v||'').trim().toLowerCase().replace(/[\s-]/g,'');
+ if(!/^[0-9a-f]{12}$/.test(code))throw Error('Нужен код из 12 символов: цифры 0–9 и буквы A–F');
+ return code;
 }
-async function seal(packet,key){
- const iv=crypto.getRandomValues(new Uint8Array(12));
- const plaintext=encoder.encode(JSON.stringify(packet));
- const cipher=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plaintext));
- return JSON.stringify({v:1,n:bytesToBase64(iv),d:bytesToBase64(cipher)});
+function base64(bytes){
+ let s='';for(const n of bytes)s+=String.fromCharCode(n);
+ return btoa(s);
 }
-async function unseal(payload,key){
- const data=JSON.parse(decoder.decode(payload));
- if(data?.v!==1||typeof data.n!=='string'||typeof data.d!=='string')throw Error('invalid packet');
- const iv=base64ToBytes(data.n);
- if(iv.length!==12)throw Error('invalid nonce');
- const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,base64ToBytes(data.d));
- const obj=JSON.parse(decoder.decode(plaintext));
- if(!obj||typeof obj!=='object')throw Error('invalid message');
- return obj;
+function unbase64(value){
+ const raw=atob(value),out=new Uint8Array(raw.length);
+ for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);
+ return out;
 }
-function makeClient(role){
- return window.mqtt.connect(MQTT_URL,{
-  clientId:'px14_'+role+'_'+bytesToHex(crypto.getRandomValues(new Uint8Array(5))),
-  protocolVersion:4,clean:true,keepalive:20,
-  connectTimeout:12000,reconnectPeriod:2500,resubscribe:true,queueQoSZero:false
- });
+async function channel(code){
+ const topicBits=await crypto.subtle.digest('SHA-256',encoder.encode('phonexr-v14-mqtt-topic:'+code));
+ const keyBits=await crypto.subtle.digest('SHA-256',encoder.encode('phonexr-v14-mqtt-key:'+code));
+ return {
+  topic:'phonexr/v14/'+hex(new Uint8Array(topicBits)).slice(0,26),
+  key:await crypto.subtle.importKey('raw',keyBits,'AES-GCM',false,['encrypt','decrypt'])
+ };
 }
-function publishSecure(client,topic,key,packet){
- if(!client?.connected)return;
- seal(packet,key).then(data=>{
-  if(client.connected)client.publish(topic,data,{qos:0,retain:false});
- }).catch(e=>console.warn('PhoneXR encrypted message failed',e));
+async function encryptMessage(message,key){
+ const nonce=crypto.getRandomValues(new Uint8Array(12));
+ const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce},key,encoder.encode(JSON.stringify(message)));
+ return JSON.stringify({v:1,n:base64(nonce),d:base64(new Uint8Array(cipher))});
 }
-function readableError(err){
- return String(err?.message||err?.type||err||'неизвестная ошибка').slice(0,120);
+async function decryptMessage(payload,key){
+ const packet=JSON.parse(payload);
+ if(packet?.v!==1||typeof packet.n!=='string'||typeof packet.d!=='string')throw Error('Invalid packet');
+ const nonce=unbase64(packet.n);
+ if(nonce.length!==12)throw Error('Invalid nonce');
+ const data=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonce},key,unbase64(packet.d));
+ return JSON.parse(decoder.decode(data));
+}
+function appendBytes(...arr){
+ const len=arr.reduce((s,a)=>s+a.length,0),out=new Uint8Array(len);
+ let n=0;for(const a of arr){out.set(a,n);n+=a.length}
+ return out;
+}
+function utf8(v){
+ const bytes=encoder.encode(v);
+ return appendBytes(Uint8Array.of(bytes.length>>8,bytes.length&255),bytes);
+}
+function remainingLength(n){
+ const result=[];
+ do{let byte=n%128;n=Math.floor(n/128);if(n>0)byte|=0x80;result.push(byte)}while(n>0);
+ return Uint8Array.from(result);
+}
+function mqttFrame(head,payload){
+ return appendBytes(Uint8Array.of(head),remainingLength(payload.length),payload);
+}
+function connectFrame(clientId){
+ return mqttFrame(0x10,appendBytes(
+  Uint8Array.of(0,4,77,81,84,84,4,2,0,30),utf8(clientId)
+ ));
+}
+function subscribeFrame(topic){
+ return mqttFrame(0x82,appendBytes(Uint8Array.of(0,1),utf8(topic),Uint8Array.of(0)));
+}
+function publishFrame(topic,payload){
+ return mqttFrame(0x30,appendBytes(utf8(topic),encoder.encode(payload)));
+}
+function parseFrames(data,callback){
+ const bytes=new Uint8Array(data);
+ let pos=0;
+ while(pos<bytes.length){
+  const head=bytes[pos++];let size=0,mult=1,byte,steps=0;
+  do{
+   if(pos>=bytes.length||++steps>4)throw Error('Неверный MQTT заголовок');
+   byte=bytes[pos++];
+   size+=(byte&127)*mult;mult*=128;
+  }while(byte&128);
+  if(size>bytes.length-pos)throw Error('Неполный MQTT пакет');
+  callback(head,bytes.slice(pos,pos+size));
+  pos+=size;
+ }
+}
+function parsePublish(packet){
+ if(packet.length<2)throw Error('Malformed PUBLISH');
+ const len=(packet[0]<<8)+packet[1];
+ if(2+len>packet.length)throw Error('Malformed topic');
+ const topic=decoder.decode(packet.slice(2,2+len));
+ return {topic,message:decoder.decode(packet.slice(2+len))};
+}
+function startSockets(role,listenTopic,onPacket,onState){
+ const sockets=new Map();
+ let stopped=false;
+ function state(){if(!stopped)onState([...sockets.values()].map(s=>({name:s.name,ready:s.ready,error:s.error})))}
+ function openBroker(broker){
+  const entry={name:broker.name,ready:false,error:'Подключаюсь',ws:null,ping:null,retry:null,handshake:null,attempts:0};
+  sockets.set(broker.name,entry);
+  const dial=()=>{
+   if(stopped)return;
+   entry.ready=false;entry.error='WebSocket...';entry.attempts++;
+   let ws;
+   try{ws=new WebSocket(broker.url,'mqtt');ws.binaryType='arraybuffer'}
+   catch(err){
+    entry.error='WebSocket недоступен: '+String(err?.message||err);
+    state();scheduleRetry();return;
+   }
+   entry.ws=ws;state();
+   entry.handshake=setTimeout(()=>{
+    if(entry.ws===ws&&!entry.ready){
+     entry.error='Тайм-аут WebSocket/MQTT';ws.close();
+    }
+   },12000);
+   ws.onopen=()=>{
+    if(stopped||ws!==entry.ws)return;
+    entry.error='MQTT CONNECT...';
+    ws.send(connectFrame('px15'+role+hex(crypto.getRandomValues(new Uint8Array(5)))));
+    state();
+   };
+   ws.onmessage=({data})=>{
+    if(stopped||ws!==entry.ws)return;
+    try{
+     parseFrames(data,(header,bytes)=>{
+      const type=header>>4;
+      if(type===2){
+       if(bytes.length<2||bytes[1]!==0){
+        entry.error='MQTT отказ, код '+(bytes[1]??'?');
+        ws.close();return;
+       }
+       entry.error='Подписываюсь...';
+       ws.send(subscribeFrame(listenTopic));
+      }else if(type===9){
+       if(bytes.length<3||bytes[2]===0x80){entry.error='Подписка отклонена';ws.close();return}
+       entry.ready=true;entry.error='';
+       clearTimeout(entry.handshake);
+       clearInterval(entry.ping);
+       entry.ping=setInterval(()=>{
+        if(ws.readyState===WebSocket.OPEN)ws.send(Uint8Array.of(0xc0,0x00));
+       },13000);
+       state();
+      }else if(type===3){
+       const packet=parsePublish(bytes);
+       if(packet.topic===listenTopic)onPacket(packet.message,broker.name);
+      }
+     });
+    }catch(err){entry.error='Ошибка протокола: '+String(err?.message||err);state()}
+   };
+   ws.onerror=()=>{
+    if(entry.ws!==ws||stopped)return;
+    entry.error='Сбой WebSocket (возможна блокировка порта)';
+    state();
+   };
+   ws.onclose=()=>{
+    if(entry.ws!==ws||stopped)return;
+    entry.ready=false;
+    clearInterval(entry.ping);clearTimeout(entry.handshake);
+    if(entry.error===''||entry.error==='Подписываюсь...'||entry.error==='MQTT CONNECT...')entry.error='Связь потеряна';
+    state();scheduleRetry();
+   };
+  };
+  const scheduleRetry=()=>{
+   if(stopped)return;
+   clearTimeout(entry.retry);
+   entry.retry=setTimeout(dial,Math.min(9000,2200+entry.attempts*800));
+  };
+  dial();
+ }
+ for(const broker of PX_BROKERS)openBroker(broker);
+ function send(message,targetName){
+  const bytesByName=new Map();
+  for(const [name,entry] of sockets){
+   if(targetName&&name!==targetName)continue;
+   if(!entry.ready||entry.ws?.readyState!==WebSocket.OPEN)continue;
+   try{
+    const payload=bytesByName.get(name)||publishFrame(listenTopic.replace(/\/(vr|camera)$/,'')+'/'+(role==='vr'?'camera':'vr'),message);
+    entry.ws.send(payload);
+   }catch(err){entry.error='Отправка: '+String(err?.message||err);state()}
+  }
+ }
+ function online(){return [...sockets.values()].filter(s=>s.ready).map(s=>s.name)}
+ function stop(){
+  stopped=true;
+  for(const s of sockets.values()){
+   clearInterval(s.ping);clearTimeout(s.retry);clearTimeout(s.handshake);
+   try{s.ws?.close()}catch{}
+  }
+  sockets.clear();
+ }
+ return {send,online,stop};
+}
+function explainServers(states){
+ const online=states.filter(s=>s.ready).map(s=>s.name);
+ if(online.length)return '✅ Сервер: '+online.join(' + ')+'.';
+ return '⚠️ Сервер недоступен: '+states.map(s=>s.name+' ('+s.error+')').join('; ');
 }
 function createReceiver(onPose,onStatus){
- let client=null,code='',channel=null,epoch=0,connectedCamera=false;
- const status=message=>{try{onStatus(message)}catch(e){console.warn('PhoneXR status:',e)}};
- function stop(){
-  epoch++;
-  try{client?.end(true)}catch{}
-  client=null;channel=null;connectedCamera=false;code='';
- }
- async function start(){
+ let session=null,token='',epoch=0,peerConnected=false,statusOnce='';
+ const status=message=>{statusOnce=message;try{onStatus(message)}catch(err){console.warn(err)}};
+ function stop(){epoch++;session?.stop();session=null;token='';peerConnected=false}
+ function start(){
   stop();
-  const id=epoch,token=freshCode();
-  status('Подключаю защищённый канал MQTT...');
-  await ensureMQTT();
-  const ch=await channelFromCode(token);
-  if(id!==epoch)throw Error('Соединение отменено');
-  channel=ch;code=token;
-  return await new Promise((resolve,reject)=>{
-   let settled=false;
-   const fail=err=>{
-    if(settled)return;settled=true;clearTimeout(timeout);
-    status('❌ MQTT: '+readableError(err)+' — попробуй Wi-Fi или другой браузер');
-    reject(err instanceof Error?err:Error(readableError(err)));
-   };
-   const timeout=setTimeout(()=>fail(Error('Сервер MQTT не ответил за 14 секунд')),14000);
-   const m=makeClient('vr');client=m;
-   m.on('connect',()=>{
-    if(id!==epoch)return;
-    m.subscribe(ch.topic+'/vr',{qos:0},err=>{
-     if(id!==epoch)return;
-     if(err){fail(err);return}
-     if(!settled){settled=true;clearTimeout(timeout);resolve(token)}
-     status('✅ MQTT подключён. Введи код на Redmi 9.');
-    });
-   });
-   m.on('message',async(topic,payload)=>{
-    if(id!==epoch||topic!==ch.topic+'/vr')return;
+  const id=epoch;
+  token=freshCode();
+  status('Код создан. Подключаю EMQX и Mosquitto...');
+  Promise.resolve().then(async()=>{
+   const ch=await channel(token);
+   if(id!==epoch)return;
+   session=startSockets('vr',ch.topic+'/vr',async(payload,broker)=>{
     try{
-     const data=await unseal(payload,ch.key);
+     const data=await decryptMessage(payload,ch.key);
      if(id!==epoch)return;
-     if(data.type==='hello'){
-      connectedCamera=true;
-      status('✅ Redmi 9 на связи! '+(data.tracking==='markerless'?'Без метки.':'По метке.'));
-      publishSecure(m,ch.topic+'/camera',ch.key,{type:'ack'});
+     if(data?.type==='hello'){
+      peerConnected=true;
+      status('✅ Redmi 9 подключён через '+broker);
+      const ack=await encryptMessage({type:'ack'},ch.key);
+      session?.send(ack,broker);
      }
-     if(data.type==='body'||data.type==='pose'||data.type==='lost'||data.type==='hello')onPose(data);
-    }catch(err){console.warn('PhoneXR dropped invalid MQTT packet',err)}
+     if(['hello','body','pose','lost'].includes(data?.type))onPose(data);
+    }catch(e){console.warn('PhoneXR ignored invalid encrypted packet:',e)}
+   },states=>{
+    if(id!==epoch)return;
+    if(peerConnected)return;
+    status(explainServers(states)+(states.some(s=>s.ready)?' Введи код на Redmi 9.':' Проверь интернет.'));
    });
-   m.on('error',err=>{if(id!==epoch)return;status('Ошибка MQTT: '+readableError(err));});
-   m.on('close',()=>{if(id===epoch&&settled){connectedCamera=false;status('Связь MQTT пропала, пытаюсь переподключиться...');onPose({type:'lost'})}});
-   m.on('reconnect',()=>{if(id===epoch)status('Переподключаю MQTT-сервер...')});
-  });
+  }).catch(err=>{if(id===epoch)status('❌ Соединение не запустилось: '+String(err?.message||err))});
+  return Promise.resolve(token);
  }
- return {start,stop,getCode:()=>code,isConnected:()=>!!client?.connected&&connectedCamera};
+ return {start,stop,getCode:()=>token,isConnected:()=>peerConnected&&!!session?.online().length};
 }
 function createSender(onStatus,trackingMode='markerless'){
- let client=null,channel=null,epoch=0,peerSeen=false,helloTimer=null,token='';
- const status=str=>{try{onStatus(str)}catch(e){console.warn(e)}};
- function stop(){
-  ++epoch;clearInterval(helloTimer);helloTimer=null;
-  try{client?.end(true)}catch{}
-  client=null;channel=null;token='';peerSeen=false;
- }
+ let session=null,epoch=0,peerConnected=false,activeBroker=null,helloTimer=null;
+ const status=message=>{try{onStatus(message)}catch(e){console.warn(e)}};
+ function stop(){epoch++;clearInterval(helloTimer);helloTimer=null;session?.stop();session=null;peerConnected=false;activeBroker=null}
  async function connect(value){
   stop();const id=epoch;
-  token=normalizeCode(value);
-  status('Загружаю MQTT...');
-  await ensureMQTT();
-  const ch=await channelFromCode(token);
-  if(id!==epoch)throw Error('Подключение отменено');
-  channel=ch;
-  return await new Promise((resolve,reject)=>{
-   let settled=false;
-   const fail=e=>{
-    if(settled)return;settled=true;clearTimeout(timeout);
-    reject(e instanceof Error?e:Error(readableError(e)));
-   };
-   const timeout=setTimeout(()=>fail(Error('Нет связи с MQTT-сервером (14 секунд)')),14000);
-   const m=makeClient('cam');client=m;
-   const hello=()=>publishSecure(m,ch.topic+'/vr',ch.key,{type:'hello',tracking:trackingMode==='aruco'?'aruco':'markerless'});
-   m.on('connect',()=>{
+  const token=normalizeCode(value);
+  status('Код принят. Подключаю два MQTT-сервера...');
+  const ch=await channel(token);
+  if(id!==epoch)return;
+  const hello=async()=>{
+   if(id!==epoch||peerConnected||!session?.online().length)return;
+   const encrypted=await encryptMessage({type:'hello',tracking:trackingMode},ch.key);
+   if(id===epoch)session.send(encrypted);
+  };
+  session=startSockets('cam',ch.topic+'/camera',async(payload,broker)=>{
+   try{
+    const data=await decryptMessage(payload,ch.key);
     if(id!==epoch)return;
-    m.subscribe(ch.topic+'/camera',{qos:0},err=>{
-     if(id!==epoch)return;
-     if(err){fail(err);return}
-     if(!settled){settled=true;clearTimeout(timeout);resolve()}
-     status('✅ MQTT подключён. Ищу Redmi 13...');
-     hello();
-     clearInterval(helloTimer);
-     helloTimer=setInterval(()=>{if(!peerSeen&&m.connected)hello()},2200);
-    });
-   });
-   m.on('message',async(topic,payload)=>{
-    if(id!==epoch||topic!==ch.topic+'/camera')return;
-    try{
-     const msg=await unseal(payload,ch.key);
-     if(id!==epoch)return;
-     if(msg.type==='ack'){
-      peerSeen=true;
-      clearInterval(helloTimer);helloTimer=null;
-      status('✅ Redmi 13 подключён! Координаты передаются.');
-     }
-    }catch(err){console.warn('Invalid camera ack',err)}
-   });
-   m.on('error',e=>{if(id===epoch)status('MQTT ошибка: '+readableError(e))});
-   m.on('close',()=>{if(id===epoch){peerSeen=false;status('MQTT связь потеряна, переподключаюсь...')}});
-   m.on('reconnect',()=>{if(id===epoch)status('Переподключаюсь...')});
+    if(data?.type==='ack'){
+     peerConnected=true;activeBroker=broker;
+     status('✅ Redmi 13 на связи через '+broker+'. Можно запускать камеру.');
+    }
+   }catch(e){console.warn('PhoneXR ignored invalid ack:',e)}
+  },states=>{
+   if(id!==epoch)return;
+   if(peerConnected&&session?.online().includes(activeBroker))return;
+   if(peerConnected&&!session?.online().includes(activeBroker)){peerConnected=false;activeBroker=null}
+   status(explainServers(states)+(states.some(s=>s.ready)?' Ожидаю Redmi 13 и проверяю код.':' Проверь интернет.'));
+   if(states.some(s=>s.ready))hello();
   });
+  helloTimer=setInterval(()=>{if(id===epoch)hello()},2200);
  }
  function send(packet){
-  if(!peerSeen||!client?.connected||!channel)return;
-  publishSecure(client,channel.topic+'/vr',channel.key,packet);
+  if(!peerConnected||!session?.online().length)return;
+  encryptMessage(packet,channelKey).then(m=>{if(session?.online().length)session.send(m,activeBroker)}).catch(console.warn);
  }
- return {connect,send,stop,isConnected:()=>peerSeen&&!!client?.connected};
+ // The key is held only in this sender instance, never stored in localStorage.
+ let channelKey=null;
+ const originalConnect=connect;
+ async function connectAndSave(value){
+  const token=normalizeCode(value);
+  const ch=await channel(token);
+  channelKey=ch.key;
+  return originalConnect(token);
+ }
+ return {connect:connectAndSave,send,stop,isConnected:()=>peerConnected&&!!session?.online().length};
 }
 window.ExternalTracking={createReceiver,createSender,anchor,project,validPose};
 })();
