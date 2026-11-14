@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.8 AR Stabilization</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.9 AR Tracking Rebuild</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -85,7 +85,7 @@
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">v0.8: исправлено перескакивание окон при больших поворотах, добавлена фильтрация аномалий датчика. Для проверки поворачивай телефон медленно сидя, нажми «ЦЕНТР» для калибровки. Распознавание руки работает на ограниченной частоте, плавность курсора не означает плавность нейросети.</div>
+      <div class="detail">v0.9: переписана 3D-математика AR — привязка окон по направлению и проекция через кватернионы, без рывков при 180°. Используй «ЦЕНТР», если датчик врёт. Это только 3DoF: положения в комнате и препятствий приложение НЕ видит.</div>
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
@@ -151,7 +151,7 @@ $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestR
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,yaw:0,pitch:0,lastEvent:0,rawYaw:0,rawPitch:0,rejected:0,samples:0}};
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
@@ -172,53 +172,88 @@ function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)open
 function initialWindows(){windows=[];openWindow('launcher');s.spatial.anchored=false}
 initialWindows();
 
-const deg=Math.PI/180, wrapAngle=a=>((a+180)%360+360)%360-180, viewYaw=62,viewPitch=45;
+// AR Space v0.9 — rotational 3DoF only. Never use this for walking or collision avoidance.
+const d2r=Math.PI/180, hfov=62*Math.PI/180, vfov=45*Math.PI/180;
+const identQuat=()=>({x:0,y:0,z:0,w:1});
 function qmul(a,b){return {x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z}}
-function onSpatialOrientation(e){
- const p=s.spatial;
- if(!p.enabled||e.alpha==null||e.beta==null||e.gamma==null)return;
- const x=e.beta*deg/2,y=e.alpha*deg/2,z=-e.gamma*deg/2;
+function qnormalize(q){const l=Math.hypot(q.x,q.y,q.z,q.w)||1;return {x:q.x/l,y:q.y/l,z:q.z/l,w:q.w/l}}
+function qconj(q){return {x:-q.x,y:-q.y,z:-q.z,w:q.w}}
+function qdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w}
+function qslerp(a,b,t){
+ let dot=qdot(a,b);if(dot<0){dot=-dot;b={x:-b.x,y:-b.y,z:-b.z,w:-b.w}}
+ dot=clamp(dot,-1,1);
+ if(dot>.9995)return qnormalize({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t,w:a.w+(b.w-a.w)*t});
+ const theta=Math.acos(dot),ss=Math.sin(theta);
+ const k1=Math.sin((1-t)*theta)/ss,k2=Math.sin(t*theta)/ss;
+ return {x:a.x*k1+b.x*k2,y:a.y*k1+b.y*k2,z:a.z*k1+b.z*k2,w:a.w*k1+b.w*k2};
+}
+function qangle(a,b){return 2*Math.acos(clamp(Math.abs(qdot(a,b)),-1,1))/d2r}
+function qrotate(q,v){
+ const tx=2*(q.y*v.z-q.z*v.y),ty=2*(q.z*v.x-q.x*v.z),tz=2*(q.x*v.y-q.y*v.x);
+ return {x:v.x+q.w*tx+q.y*tz-q.z*ty,y:v.y+q.w*ty+q.z*tx-q.x*tz,z:v.z+q.w*tz+q.x*ty-q.y*tx};
+}
+function qfromDevice(e){
+ if(e.alpha==null||e.beta==null||e.gamma==null)return null;
+ const x=e.beta*d2r/2,y=e.alpha*d2r/2,z=-e.gamma*d2r/2;
  const c1=Math.cos(x),c2=Math.cos(y),c3=Math.cos(z),t1=Math.sin(x),t2=Math.sin(y),t3=Math.sin(z);
  let q={x:t1*c2*c3+c1*t2*t3,y:c1*t2*c3-t1*c2*t3,z:c1*c2*t3-t1*t2*c3,w:c1*c2*c3+t1*t2*t3};
+ // Convert phone pose to rear-camera orientation and compensate the landscape screen rotation.
  q=qmul(q,{x:-Math.SQRT1_2,y:0,z:0,w:Math.SQRT1_2});
- const half=((window.screen.orientation?.angle??window.orientation??0)*deg)/2;
- q=qmul(q,{x:0,y:0,z:-Math.sin(half),w:Math.cos(half)});
- const tx=-2*q.y,ty=2*q.x,tz=0;
- const fx=q.w*tx+q.y*tz-q.z*ty,fy=q.w*ty+q.z*tx-q.x*tz,fz=-1+q.x*ty-q.y*tx;
- const rawYaw=Math.atan2(fx,-fz)/deg,rawPitch=Math.asin(clamp(fy,-1,1))/deg;
- const now=performance.now();
- if(!p.ready){
-  p.yaw=rawYaw;p.pitch=rawPitch;p.rawYaw=rawYaw;p.rawPitch=rawPitch;
-  p.ready=true;p.lastEvent=now;p.samples=1;return;
- }
- const dt=clamp(now-p.lastEvent,1,250);
- const dyaw=wrapAngle(rawYaw-p.rawYaw),dpitch=rawPitch-p.rawPitch;
- // Reject sudden sensor/compass discontinuities. Keep the previous trusted pose.
- if(Math.abs(dyaw)>Math.max(9,dt*.33)||Math.abs(dpitch)>Math.max(9,dt*.33)){
-  p.rejected++;return;
- }
- p.rawYaw=rawYaw;p.rawPitch=rawPitch;p.lastEvent=now;p.samples++;
- // Continuous unwrapped heading avoids teleporting windows across +/-180 degrees.
- p.yaw+=dyaw;p.pitch=clamp(p.pitch+dpitch,-89,89);
+ const screenHalf=((window.screen.orientation?.angle??window.orientation??0)*d2r)/2;
+ q=qmul(q,{x:0,y:0,z:-Math.sin(screenHalf),w:Math.cos(screenHalf)});
+ return qnormalize(q);
 }
+function sensorReset(){
+ const p=s.spatial;p.pose=null;p.lastRaw=null;p.ready=false;p.anchored=false;p.samples=0;p.rejected=0;p.lastEvent=0;
+}
+function onSpatialOrientation(e){
+ const p=s.spatial;if(!p.enabled)return;
+ const q=qfromDevice(e);if(!q)return;
+ const now=performance.now();
+ if(p.lastRaw===null){
+  p.pose=q;p.lastRaw=q;p.ready=true;p.lastEvent=now;p.samples=1;
+  return;
+ }
+ const deltaMs=clamp(now-p.lastEvent,1,500),angle=qangle(p.lastRaw,q);
+ // Ignore isolated sensor discontinuities; 360°/s motion is the maximum accepted.
+ if(angle>Math.max(12,deltaMs*.36)){
+  p.rejected++;
+  if(p.rejected%10===0){p.lastRaw=q;p.pose=q;p.anchored=false;p.lastEvent=now}
+  return;
+ }
+ p.lastEvent=now;p.lastRaw=q;p.samples++;
+ const t=clamp(1-Math.exp(-deltaMs/34),.22,.94);
+ p.pose=qslerp(p.pose,q,t);
+}
+function onSensorScreenChange(){if(s.spatial.enabled)sensorReset()}
 async function beginSpatial(){
- const p=s.spatial;p.enabled=!!s.spatialMode;p.ready=false;p.anchored=false;p.lastEvent=0;p.rejected=0;p.samples=0;
+ const p=s.spatial;p.enabled=!!s.spatialMode;p.source=null;sensorReset();
  if(!p.enabled)return;
  try{
-  if(typeof DeviceOrientationEvent==='undefined')throw Error('Orientation sensor unavailable');
+  if(typeof DeviceOrientationEvent==='undefined')throw Error('Нет датчика ориентации');
   if(typeof DeviceOrientationEvent.requestPermission==='function'){
-   const state=await DeviceOrientationEvent.requestPermission();
-   if(state!=='granted')throw Error('Orientation permission refused');
+   const ans=await DeviceOrientationEvent.requestPermission();
+   if(ans!=='granted')throw Error('Не выдано разрешение датчика');
   }
   window.addEventListener('deviceorientation',onSpatialOrientation);
- }catch(e){p.enabled=false;console.warn('Spatial mode unavailable',e)}
+  window.addEventListener('orientationchange',onSensorScreenChange);
+  window.screen.orientation?.addEventListener?.('change',onSensorScreenChange);
+ }catch(e){p.enabled=false;console.warn('3DoF sensors disabled:',e)}
 }
-function stopSpatial(){window.removeEventListener('deviceorientation',onSpatialOrientation);s.spatial.enabled=false;s.spatial.ready=false;s.spatial.anchored=false}
+function stopSpatial(){
+ window.removeEventListener('deviceorientation',onSpatialOrientation);
+ window.removeEventListener('orientationchange',onSensorScreenChange);
+ window.screen.orientation?.removeEventListener?.('change',onSensorScreenChange);
+ s.spatial.enabled=false;sensorReset();
+}
+function toUnit(x,y,z){const l=Math.hypot(x,y,z)||1;return {x:x/l,y:y/l,z:z/l}}
 function anchorWindow(w){
- const p=s.spatial;if(!p.ready)return;
+ const p=s.spatial;if(!p.ready||!p.pose)return;
  w.homeX=w.x;w.homeY=w.y;
- w.anchorYaw=p.yaw+(w.x+w.w/2-BASE_W/2)*viewYaw/BASE_W;
- w.anchorPitch=p.pitch-(w.y+w.h/2-BASE_H/2)*viewPitch/BASE_H;
+ const cx=w.x+w.w/2,cy=w.y+w.h/2;
+ const x=(cx/BASE_W*2-1)*Math.tan(hfov/2),y=(1-cy/BASE_H*2)*Math.tan(vfov/2);
+ w.worldDir=qrotate(p.pose,toUnit(x,y,-1));
+ w.hiddenSpatial=false;
 }
 function recenterSpatial(){
  const p=s.spatial;if(!p.enabled||!p.ready)return;
@@ -226,12 +261,24 @@ function recenterSpatial(){
  p.anchored=true;
 }
 function projectSpatial(){
- const p=s.spatial;if(!p.enabled||!p.ready||performance.now()-p.lastEvent>1800)return;
+ const p=s.spatial;if(!p.enabled)return;
+ if(!p.ready||!p.pose||performance.now()-p.lastEvent>1500){
+  // Do not keep projecting with stale orientation. Keep the last screen image.
+  return;
+ }
  if(!p.anchored){recenterSpatial();return}
+ const kx=BASE_W/(2*Math.tan(hfov/2)),ky=BASE_H/(2*Math.tan(vfov/2));
+ const qi=qconj(p.pose);
  for(const w of windows){
-  if(w.anchorYaw==null)anchorWindow(w);
-  w.x=BASE_W/2+(w.anchorYaw-p.yaw)*BASE_W/viewYaw-w.w/2;
-  w.y=BASE_H/2-(w.anchorPitch-p.pitch)*BASE_H/viewPitch-w.h/2;
+  if(!w.worldDir)anchorWindow(w);
+  const dir=qrotate(qi,w.worldDir);
+  // Objects behind the user must stay behind; do not wrap or teleport them.
+  if(dir.z>=-.04){
+   w.hiddenSpatial=true;continue;
+  }
+  w.hiddenSpatial=false;
+  w.x=BASE_W/2+(dir.x/-dir.z)*kx-w.w/2;
+  w.y=BASE_H/2-(dir.y/-dir.z)*ky-w.h/2;
  }
 }
 function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w)}
@@ -301,11 +348,11 @@ function drawUIAtlas(){
   ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,w,height);
   ctx.setTransform(w/BASE_W,0,0,height/BASE_H,0,0);
   if(s.demo)drawCamera(0);
-  regions=[];for(const win of windows)drawWindow(win);
+  regions=[];for(const win of windows){if(!win.hiddenSpatial)drawWindow(win)}
   if(s.spatial.enabled){
    activeDrawWin=null;
    actionRect(760,595,220,72,'⟳ ЦЕНТР',recenterSpatial,'primary',25);
-   text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR: поворот • отброшено '+s.spatial.rejected:'AR: нет данных датчика',BASE_W/2,82,20,'#91fff3',700,'center');
+   text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR: 3D ориентация • отброшено '+s.spatial.rejected:'AR: нет данных датчика',BASE_W/2,82,20,'#91fff3',700,'center');
   }
   drawHand();
   text('XR • кам '+(s.cameraFps||'…')+' • UI '+(s.fps||'…')+' • ИИ/с '+(s.handDetectFPS||'…')+' • '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),20,34,17,'#e4fbff',650);
@@ -338,7 +385,7 @@ function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);
  }
  if(s.hand&&now-s.handSeen>650){if(s.pinching)endPinch();s.hand=null;s.pinching=false}
  requestAnimationFrame(render)}
-function hit(x,y){if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
+function hit(x,y){if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){if(windows[i].hiddenSpatial)continue;const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
 function beginPinch(){if(!s.hand)return;const target=hit(s.hand.x,s.hand.y);if(!target){s.hold=null;return}const w=target.win;if(w){windows.splice(windows.indexOf(w),1);windows.push(w)}s.hold={target,initX:s.hand.x,initY:s.hand.y,ox:w?.x,oy:w?.y,moved:false}}
 function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true;updateSpatialDrag(w)}
 function endPinch(){const h=s.hold;s.hold=null;if(!h)return;if(!h.moved&&h.target.action){h.target.action()}else if(h.moved)saveLayouts()}
