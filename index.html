@@ -380,7 +380,7 @@ async function enterMode(demo){
   s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;
   $('setup').classList.add('hidden');fit();
   try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
-  try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
+  try{if(window.screen.orientation?.lock)await window.screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
   os.textContent=demo?'Демо: управление касаниями':(s.disableTracking?'Тест скорости: жесты отключены':'Камера отдельно от интерфейса • загружаю распознавание');
   if(!demo)watchCameraFPS(sessionId);
   requestAnimationFrame(render);
