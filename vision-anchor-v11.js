@@ -25,7 +25,7 @@ function choose(a){
  c.sort((a,b)=>b.sc-a.sc);
  const out=[];
  for(const p of c){
-  if(out.length>=16)break;
+  if(out.length>=12)break;
   if(out.every(q=>(q.x-p.x)**2+(q.y-p.y)**2>=130))out.push(p);
  }
  return out;
