@@ -83,6 +83,7 @@
       <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
 <div class="setting"><label for="spatialMode">AR-пространство (3DoF, только сидя)</label><input type="checkbox" id="spatialMode"></div>
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
+<div class="setting"><label for="trackSize">Качество распознавания руки <b id="trackSizeText">224px</b></label><input type="range" id="trackSize" min="160" max="320" step="32" value="224"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
       <div class="detail">v0.9: переписана 3D-математика AR — привязка окон по направлению и проекция через кватернионы, без рывков при 180°. Используй «ЦЕНТР», если датчик врёт. Это только 3DoF: положения в комнате и препятствий приложение НЕ видит.</div>
@@ -150,14 +151,14 @@ $('testCameraBtn').addEventListener('click',async()=>{
 $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65}};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','trackSize','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
 for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
 function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';updateCameraVisual();saveSettings()}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
 for(const key of SETTING_KEYS)$(key).addEventListener('input',syncSettings);
 syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
@@ -304,30 +305,39 @@ function drawCamera(eye){if(s.demo||video.readyState<2){const g=ctx.createLinear
  const crop=cropForEye(canvas.width/2,canvas.height);ctx.save();if(s.mirror){ctx.translate(BASE_W,0);ctx.scale(-1,1)}ctx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,BASE_W,BASE_H);ctx.restore();ctx.fillStyle='rgba(0,13,25,.09)';ctx.fillRect(0,0,BASE_W,BASE_H)
 }
 function smoothHandVisual(now){
- const target=s.hand;
- if(!target||now-s.handSeen>650){s.visualHand=null;s.lastVisualUpdate=now;return}
+ const t=s.hand;
+ if(!t||now-s.handSeen>720){s.visualHand=null;s.lastVisualUpdate=now;return}
  const dt=clamp(now-(s.lastVisualUpdate||now),1,80);
  s.lastVisualUpdate=now;
- const jump=s.visualHand?Math.hypot(target.x-s.visualHand.x,target.y-s.visualHand.y):0;
- const alpha=clamp(1-Math.exp(-dt/(jump>90?9:jump>25?17:27)),.42,.98);
- if(!s.visualHand||!target.landmarks?.length){
-  s.visualHand={x:target.x,y:target.y,landmarks:target.landmarks?.map(p=>({x:p.x,y:p.y,z:p.z}))||null};
+ // Prediction is visual only. Buttons still use measured, non-predicted landmarks.
+ const age=clamp(now-s.handSeen,0,65)/1000;
+ const targetX=t.x+clamp(t.vx||0,-600,600)*age*.45;
+ const targetY=t.y+clamp(t.vy||0,-600,600)*age*.45;
+ if(!s.visualHand||!t.landmarks?.length){
+  s.visualHand={x:targetX,y:targetY,landmarks:t.landmarks?.map(p=>({x:p.x,y:p.y,z:p.z}))||null};
   return;
  }
- const v=s.visualHand;
- v.x+=(target.x-v.x)*alpha;v.y+=(target.y-v.y)*alpha;
- if(!v.landmarks||v.landmarks.length!==target.landmarks.length){
-  v.landmarks=target.landmarks.map(p=>({x:p.x,y:p.y,z:p.z}));return;
+ const v=s.visualHand,dist=Math.hypot(targetX-v.x,targetY-v.y);
+ const mix=clamp(1-Math.exp(-dt/(dist>80?8:dist>28?14:24)),.55,.98);
+ v.x+=(targetX-v.x)*mix;v.y+=(targetY-v.y)*mix;
+ if(!v.landmarks||v.landmarks.length!==t.landmarks.length){
+  v.landmarks=t.landmarks.map(p=>({x:p.x,y:p.y,z:p.z}));return;
  }
- for(let i=0;i<target.landmarks.length;i++){
-  const a=target.landmarks[i],b=v.landmarks[i];
-  b.x+=(a.x-b.x)*alpha;b.y+=(a.y-b.y)*alpha;b.z+=((a.z||0)-(b.z||0))*alpha;
+ const lmMix=clamp(mix*.93,.45,.92);
+ for(let i=0;i<t.landmarks.length;i++){
+  const a=t.landmarks[i],b=v.landmarks[i];
+  b.x+=(a.x-b.x)*lmMix;b.y+=(a.y-b.y)*lmMix;b.z+=((a.z||0)-(b.z||0))*lmMix;
  }
 }
 function drawHand(){
  const v=s.visualHand;if(!v)return;
  if(s.showSkeleton&&v.landmarks){
   const pts=v.landmarks.map(pointToScreen);
+  if(pts[8]){
+   // Keep the hand skeleton visually connected to the low-latency cursor.
+   const sx=clamp(v.x-pts[8].x,-38,38),sy=clamp(v.y-pts[8].y,-38,38);
+   for(const pt of pts){if(pt){pt.x+=sx;pt.y+=sy}}
+  }
   ctx.lineWidth=3;ctx.strokeStyle='rgba(122,255,231,.63)';ctx.beginPath();
   for(const [a,b] of HAND_LINES){if(!pts[a]||!pts[b])continue;ctx.moveTo(pts[a].x,pts[a].y);ctx.lineTo(pts[b].x,pts[b].y)}
   ctx.stroke();
@@ -393,12 +403,48 @@ function setHand(landmarks){
  const now=performance.now();
  if(!s.handSamplesStart)s.handSamplesStart=now;
  s.handSamples++;
- if(now-s.handSamplesStart>=1000){s.handDetectFPS=Math.round(s.handSamples*1000/(now-s.handSamplesStart));s.handSamplesStart=now;s.handSamples=0}
- if(!landmarks||!landmarks.length){if(s.pinching)endPinch();s.hand=null;s.pinching=false;s.pinchCandidate=0;s.releaseCandidate=0;return}
- const raw=pointToScreen(landmarks[8]);if(!raw||!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return;const d=(a,b)=>Math.hypot(landmarks[a].x-landmarks[b].x,landmarks[a].y-landmarks[b].y);const ratio=d(4,8)/Math.max(.02,d(5,17));const pinch=ratio<.48;const release=ratio>.68;
- if(!s.hand)s.hand={x:raw.x,y:raw.y};else{s.hand.x=raw.x;s.hand.y=raw.y} s.hand.landmarks=landmarks;s.handSeen=performance.now();
- if(!s.pinching){s.pinchCandidate=pinch?s.pinchCandidate+1:0;if(s.pinchCandidate>=2){s.pinching=true;s.releaseCandidate=0;beginPinch()}}
- else{movePinch();s.releaseCandidate=release?s.releaseCandidate+1:0;if(s.releaseCandidate>=2){s.pinching=false;s.pinchCandidate=0;endPinch()}}
+ if(now-s.handSamplesStart>=1000){
+  s.handDetectFPS=Math.round(s.handSamples*1000/(now-s.handSamplesStart));
+  s.handSamplesStart=now;s.handSamples=0;
+ }
+ if(!landmarks||!landmarks.length){
+  s.handMisses++;
+  if(s.handMisses<2)return; // Allow a single dropped detection.
+  if(s.pinching)endPinch();
+  s.hand=null;s.pinching=false;s.pinchCandidate=0;s.releaseCandidate=0;
+  return;
+ }
+ s.handMisses=0;
+ const raw=pointToScreen(landmarks[8]);
+ if(!raw||!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return;
+ const d=(a,b)=>Math.hypot(landmarks[a].x-landmarks[b].x,landmarks[a].y-landmarks[b].y);
+ const ratio=d(4,8)/Math.max(.02,d(5,17));
+ if(!s.hand){
+  s.hand={x:raw.x,y:raw.y,vx:0,vy:0};
+ }else{
+  const last=s.hand,dt=Math.max(30,now-s.handSeen);
+  const jump=Math.hypot(raw.x-last.x,raw.y-last.y);
+  // Sudden reacquisition is a poor velocity estimate; do not extrapolate it.
+  const velocityOk=dt<550&&jump<240;
+  last.vx=velocityOk?clamp((raw.x-last.x)*1000/dt,-700,700):0;
+  last.vy=velocityOk?clamp((raw.y-last.y)*1000/dt,-700,700):0;
+  last.x=raw.x;last.y=raw.y;
+ }
+ s.hand.landmarks=landmarks;s.handSeen=now;
+ if(!s.pinching){
+  const strongPinch=ratio<.35,maybePinch=ratio<.48;
+  s.pinchCandidate=maybePinch?s.pinchCandidate+1:0;
+  if(strongPinch||s.pinchCandidate>=2){
+   s.pinching=true;s.releaseCandidate=0;beginPinch();
+  }
+ }else{
+  movePinch();
+  const strongRelease=ratio>.94,maybeRelease=ratio>.68;
+  s.releaseCandidate=maybeRelease?s.releaseCandidate+1:0;
+  if(strongRelease||s.releaseCandidate>=2){
+   s.pinching=false;s.pinchCandidate=0;endPinch();
+  }
+ }
 }
 // Hand inference is synchronous in MediaPipe. Use a dedicated worker so rendering stays responsive.
 const trackCanvas=document.createElement('canvas');
@@ -406,7 +452,7 @@ trackCanvas.width=480;trackCanvas.height=270;
 const trackCtx=trackCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 function fastTrackSize(){
  const vw=video.videoWidth||640,vh=video.videoHeight||480;
- const w=s.lowPower?192:256;
+ const w=s.lowPower?160:(s.trackSize||224);
  return {w,h:Math.max(1,Math.round(w*vh/vw))};
 }
 function closeTracker(){
@@ -473,7 +519,7 @@ function runTracking(now){
  if(s.workerReady&&s.worker){
   if(s.trackingBusy)return;
   // Reduce sampling when animation starts dropping frames, rather than slowing every VR frame.
-  const interval=s.lowPower?300:(s.fps&&s.fps<21?200:s.fps&&s.fps<26?140:95);
+  const interval=s.lowPower?190:(s.fps&&s.fps<19?155:s.fps&&s.fps<24?100:60);
   s.trackingInterval=interval;
   if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
   s.lastDetected=now;s.lastVideoTime=video.currentTime;s.trackingBusy=true;
@@ -505,7 +551,7 @@ function runTracking(now){
  }
  if(!s.tracker)return;
  // Slow fallback can block the main thread. Use small input and fewer detections.
- const interval=s.lowPower?450:(s.fps&&s.fps<22?310:210);
+ const interval=s.lowPower?430:(s.fps&&s.fps<22?330:220);
  s.trackingInterval=interval;
  if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
  s.lastDetected=now;s.lastVideoTime=video.currentTime;
@@ -563,7 +609,7 @@ async function enterMode(demo){
   }else{s.cameraStatus='ДЕМО';screen.classList.remove('camera-active')}
   s.demo=demo;s.trackerStatus=demo?'выкл':(s.disableTracking?'отключено':'загрузка');
   s.running=true;initialWindows();s.timerLast=performance.now();
-  s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;s.captureMs=0;s.inferenceMs=0;s.handSamples=0;s.handSamplesStart=0;s.handDetectFPS=0;s.visualHand=null;s.lastVisualUpdate=0;
+  s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;s.captureMs=0;s.inferenceMs=0;s.handSamples=0;s.handSamplesStart=0;s.handDetectFPS=0;s.visualHand=null;s.lastVisualUpdate=0;s.handMisses=0;
   $('setup').classList.add('hidden');fit();
   try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
   try{if(window.screen.orientation?.lock)await window.screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
