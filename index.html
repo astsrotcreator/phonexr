@@ -181,7 +181,9 @@ let windows=[], regions=[], activeDrawWin=null;
 function restoreLayouts(){try{return JSON.parse(localStorage.getItem('phonexr-layouts')||'{}')}catch{return {}}}
 const layouts=restoreLayouts();
 function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.homeX??w.x,w.homeY??w.y,w.w,w.h]]))))}catch{}}
-function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w);if(s.spatial.enabled&&s.spatial.ready){w.homeX=w.x;w.homeY=w.y;anchorWindow(w)}}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
+function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w);
+ if(s.spatial.enabled&&s.spatial.ready){w.homeX=w.x;w.homeY=w.y;anchorWindow(w)}
+ else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
 function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
 function initialWindows(){windows=[];openWindow('launcher');s.spatial.anchored=false}
 initialWindows();
@@ -295,7 +297,81 @@ function projectSpatial(){
   w.y=BASE_H/2-(dir.y/-dir.z)*ky-w.h/2;
  }
 }
-function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w)}
+function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w);else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}
+
+const VISION_W=128,VISION_H=96;
+const visionFallback=document.createElement('canvas');
+visionFallback.width=VISION_W;visionFallback.height=VISION_H;
+const visionFallbackCtx=visionFallback.getContext('2d',{alpha:false});
+function recenterVision(){
+ const p=s.vision;if(!p.enabled)return;
+ for(const w of windows){
+  w.x=clamp(w.homeX??w.x,0,BASE_W-w.w);
+  w.y=clamp(w.homeY??w.y,0,BASE_H-w.h);
+  w.homeX=w.x;w.homeY=w.y;w.hiddenSpatial=false;
+ }
+ p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='калибровка';
+ p.worker?.postMessage({type:'reset'});
+}
+function startVision(sid){
+ const p=s.vision;
+ p.enabled=!!s.visionMode;p.ready=false;p.busy=false;p.worker=null;
+ p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.lastCapture=0;p.lastVideoTime=-1;
+ p.quality=0;p.points=0;p.status='загрузка';
+ if(!p.enabled)return;
+ if(!window.Worker||!window.createImageBitmap){p.enabled=false;p.status='не поддерживается';return}
+ try{
+  const worker=new Worker('./vision-anchor-worker.js',{type:'module'});
+  p.worker=worker;p.ready=true;p.status='ищу ориентиры';
+  worker.onmessage=({data})=>{
+   if(s.sessionId!==sid||!s.running||p.worker!==worker)return;
+   if(data.type==='flow'){
+    p.busy=false;p.lastEvent=performance.now();p.points=data.points||0;
+    p.quality=Math.round((data.quality||0)*100);p.processingMs=data.processingMs||0;
+    p.status=data.status==='tracking'?'слежение':data.status==='init'?'ищу детали':
+      data.status==='reacquire'?'потеряны ориентиры':'неустойчиво';
+    if(data.status==='tracking'&&data.quality>=.53&&data.points>=5){
+     p.targetX=clamp(p.targetX+clamp(data.dx,-14,14)*BASE_W/VISION_W,-4000,4000);
+     p.targetY=clamp(p.targetY+clamp(data.dy,-14,14)*BASE_H/VISION_H,-2600,2600);
+    }
+   }else if(data.type==='error'){
+    p.busy=false;p.status='ошибка: '+String(data.message||'').slice(0,35);
+   }else if(data.type==='reset'){p.busy=false;p.status='ищу детали'}
+  };
+  worker.onerror=e=>{if(p.worker!==worker)return;p.status='недоступен';worker.terminate();p.worker=null;p.enabled=false;p.busy=false;console.error('Vision worker:',e.message)};
+ }catch(e){p.enabled=false;p.status='не поддерживается';console.warn('Vision AR:',e)}
+}
+function stopVision(){
+ const p=s.vision;p.worker?.terminate();p.worker=null;p.enabled=false;p.ready=false;
+ p.busy=false;p.quality=0;p.points=0;
+}
+function runVision(now){
+ const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||!video.videoWidth||video.readyState<2)return;
+ const interval=s.fps&&s.fps<21?360:s.fps&&s.fps<27?270:185;
+ if(now-p.lastCapture<interval||video.currentTime===p.lastVideoTime)return;
+ p.busy=true;p.lastCapture=now;p.lastVideoTime=video.currentTime;
+ const sid=s.sessionId,worker=p.worker;
+ function fallback(){try{visionFallbackCtx.drawImage(video,0,0,VISION_W,VISION_H);return createImageBitmap(visionFallback)}catch(e){return Promise.reject(e)}}
+ let task;
+ try{task=createImageBitmap(video,0,0,video.videoWidth,video.videoHeight,{resizeWidth:VISION_W,resizeHeight:VISION_H,resizeQuality:'low'}).catch(fallback)}
+ catch(e){task=fallback()}
+ task.then(bitmap=>{
+  if(!s.running||sid!==s.sessionId||worker!==p.worker){bitmap.close();p.busy=false;return}
+  try{worker.postMessage({type:'frame',bitmap},[bitmap])}
+  catch(e){bitmap.close();p.busy=false;p.status='ошибка передачи кадра'}
+ }).catch(e=>{p.busy=false;p.status='не удалось получить кадр';console.warn('Visual capture:',e)});
+}
+function projectVision(){
+ const p=s.vision;if(!p.enabled)return;
+ const dx=p.targetX-p.shiftX,dy=p.targetY-p.shiftY;
+ p.shiftX+=Math.abs(dx)<.2?dx:dx*.47;
+ p.shiftY+=Math.abs(dy)<.2?dy:dy*.47;
+ for(const w of windows){
+  if(w.homeX==null){w.homeX=w.x-p.shiftX;w.homeY=w.y-p.shiftY}
+  w.hiddenSpatial=false;
+  w.x=w.homeX+p.shiftX;w.y=w.homeY+p.shiftY;
+ }
+}
 function rrect(x,y,w,h,r,fill,stroke,lineWidth=1){ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(r,h/2,w/2));if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}}
 function text(t,x,y,size=28,color='#eafbff',weight=500,align='left'){ctx.font=`${weight} ${size}px system-ui,-apple-system,Arial`;ctx.textBaseline='middle';ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(String(t),x,y)}
 function multiLine(value,x,y,maxWidth,lineHeight,size=27,color='#d9eaf1',maxLines=5){ctx.font=`500 ${size}px system-ui`;const words=String(value).split(/\s+/);let line='',lineNum=0;for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){text(line,x,y+lineHeight*lineNum,size,color);line=word;lineNum++;if(lineNum>=maxLines-1)break}else{line=next}}if(lineNum<maxLines)text(line,x,y+lineHeight*lineNum,size,color)}
@@ -372,7 +448,11 @@ function drawUIAtlas(){
   ctx.setTransform(w/BASE_W,0,0,height/BASE_H,0,0);
   if(s.demo)drawCamera(0);
   regions=[];for(const win of windows){if(!win.hiddenSpatial)drawWindow(win)}
-  if(s.spatial.enabled){
+  if(s.vision.enabled){
+   activeDrawWin=null;
+   actionRect(730,595,250,72,'⟳ ПРИВЯЗАТЬ',recenterVision,'primary',25);
+   text('AR-камера • '+s.vision.status+' • '+s.vision.points+' точек • '+s.vision.quality+'%',BASE_W/2,82,20,'#91fff3',700,'center');
+  }else if(s.spatial.enabled){
    activeDrawWin=null;
    actionRect(760,595,220,72,'⟳ ЦЕНТР',recenterSpatial,'primary',25);
    text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR: 3D ориентация • отброшено '+s.spatial.rejected:'AR: нет данных датчика',BASE_W/2,82,20,'#91fff3',700,'center');
@@ -391,9 +471,10 @@ function renderEye(eye,eyeW,h){
 }
 function fit(){const ratio=clamp(s.renderScale||1,.7,1.5);const w=innerWidth,h=innerHeight;const cw=Math.max(2,Math.floor(w*ratio)),ch=Math.max(2,Math.floor(h*ratio));if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch}}
 window.addEventListener('resize',fit);fit();
-function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);if(s.timerRunning){const elapsed=(now-s.timerLast)/1000;s.timerLast=now;s.timerRemaining=Math.max(0,s.timerRemaining-elapsed);if(s.timerRemaining<=0)s.timerRunning=false}
+function render(now){if(!s.running)return;s.frame++;if(!s.demo){runTracking(now);runVision(now)}if(s.timerRunning){const elapsed=(now-s.timerLast)/1000;s.timerLast=now;s.timerRemaining=Math.max(0,s.timerRemaining-elapsed);if(s.timerRemaining<=0)s.timerRunning=false}
  if(!s.lastDraw||now-s.lastDraw>31){
   smoothHandVisual(now);
+  projectVision();
   projectSpatial();
   drawUIAtlas();
    ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -408,7 +489,7 @@ function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);
  }
  if(s.hand&&now-s.handSeen>650){if(s.pinching)endPinch();s.hand=null;s.pinching=false}
  requestAnimationFrame(render)}
-function hit(x,y){if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){if(windows[i].hiddenSpatial)continue;const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
+function hit(x,y){if(s.vision.enabled&&x>=730&&x<=980&&y>=595&&y<=667)return {action:recenterVision,win:null};if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){if(windows[i].hiddenSpatial)continue;const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
 function beginPinch(){if(!s.hand)return;const target=hit(s.hand.x,s.hand.y);if(!target){s.hold=null;return}const w=target.win;if(w){windows.splice(windows.indexOf(w),1);windows.push(w)}s.hold={target,initX:s.hand.x,initY:s.hand.y,ox:w?.x,oy:w?.y,moved:false}}
 function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true;updateSpatialDrag(w)}
 function endPinch(){const h=s.hold;s.hold=null;if(!h)return;if(!h.moved&&h.target.action){h.target.action()}else if(h.moved)saveLayouts()}
