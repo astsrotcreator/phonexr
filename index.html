@@ -171,6 +171,56 @@ function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type=
 function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
 function initialWindows(){windows=[];openWindow('launcher');s.spatial.anchored=false}
 initialWindows();
+
+const deg=Math.PI/180, wrapAngle=a=>((a+180)%360+360)%360-180, viewYaw=62,viewPitch=45;
+function qmul(a,b){return {x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z}}
+function onSpatialOrientation(e){
+ const p=s.spatial;if(!p.enabled||e.alpha==null||e.beta==null||e.gamma==null)return;
+ const x=e.beta*deg/2,y=e.alpha*deg/2,z=-e.gamma*deg/2;
+ const c1=Math.cos(x),c2=Math.cos(y),c3=Math.cos(z),t1=Math.sin(x),t2=Math.sin(y),t3=Math.sin(z);
+ let q={x:t1*c2*c3+c1*t2*t3,y:c1*t2*c3-t1*c2*t3,z:c1*c2*t3-t1*t2*c3,w:c1*c2*c3+t1*t2*t3};
+ q=qmul(q,{x:-Math.SQRT1_2,y:0,z:0,w:Math.SQRT1_2});
+ const half=((window.screen.orientation?.angle??window.orientation??0)*deg)/2;
+ q=qmul(q,{x:0,y:0,z:-Math.sin(half),w:Math.cos(half)});
+ const tx=-2*q.y,ty=2*q.x,tz=0;
+ const fx=q.w*tx+q.y*tz-q.z*ty,fy=q.w*ty+q.z*tx-q.x*tz,fz=-1+q.x*ty-q.y*tx;
+ p.yaw=Math.atan2(fx,-fz)/deg;p.pitch=Math.asin(clamp(fy,-1,1))/deg;
+ p.lastEvent=performance.now();p.ready=true;
+}
+async function beginSpatial(){
+ const p=s.spatial;p.enabled=!!s.spatialMode;p.ready=false;p.anchored=false;p.lastEvent=0;
+ if(!p.enabled)return;
+ try{
+  if(typeof DeviceOrientationEvent==='undefined')throw Error('Orientation sensor unavailable');
+  if(typeof DeviceOrientationEvent.requestPermission==='function'){
+   const state=await DeviceOrientationEvent.requestPermission();
+   if(state!=='granted')throw Error('Orientation permission refused');
+  }
+  window.addEventListener('deviceorientation',onSpatialOrientation);
+ }catch(e){p.enabled=false;console.warn('Spatial mode unavailable',e)}
+}
+function stopSpatial(){window.removeEventListener('deviceorientation',onSpatialOrientation);s.spatial.enabled=false;s.spatial.ready=false;s.spatial.anchored=false}
+function anchorWindow(w){
+ const p=s.spatial;if(!p.ready)return;
+ w.homeX=w.x;w.homeY=w.y;
+ w.anchorYaw=p.yaw+(w.x+w.w/2-BASE_W/2)*viewYaw/BASE_W;
+ w.anchorPitch=p.pitch-(w.y+w.h/2-BASE_H/2)*viewPitch/BASE_H;
+}
+function recenterSpatial(){
+ const p=s.spatial;if(!p.enabled||!p.ready)return;
+ for(const w of windows){w.x=w.homeX??w.x;w.y=w.homeY??w.y;anchorWindow(w)}
+ p.anchored=true;
+}
+function projectSpatial(){
+ const p=s.spatial;if(!p.enabled||!p.ready||performance.now()-p.lastEvent>1800)return;
+ if(!p.anchored){recenterSpatial();return}
+ for(const w of windows){
+  if(w.anchorYaw==null)anchorWindow(w);
+  w.x=BASE_W/2+wrapAngle(w.anchorYaw-p.yaw)*BASE_W/viewYaw-w.w/2;
+  w.y=BASE_H/2-(w.anchorPitch-p.pitch)*BASE_H/viewPitch-w.h/2;
+ }
+}
+function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w)}
 function rrect(x,y,w,h,r,fill,stroke,lineWidth=1){ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(r,h/2,w/2));if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}}
 function text(t,x,y,size=28,color='#eafbff',weight=500,align='left'){ctx.font=`${weight} ${size}px system-ui,-apple-system,Arial`;ctx.textBaseline='middle';ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(String(t),x,y)}
 function multiLine(value,x,y,maxWidth,lineHeight,size=27,color='#d9eaf1',maxLines=5){ctx.font=`500 ${size}px system-ui`;const words=String(value).split(/\s+/);let line='',lineNum=0;for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){text(line,x,y+lineHeight*lineNum,size,color);line=word;lineNum++;if(lineNum>=maxLines-1)break}else{line=next}}if(lineNum<maxLines)text(line,x,y+lineHeight*lineNum,size,color)}
