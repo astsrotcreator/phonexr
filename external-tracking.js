@@ -2,20 +2,6 @@
    ArUco/POSIT pose is approximate until camera intrinsics and marker mounting are calibrated. */
 (function(){
 'use strict';
-const PEERJS_URL='https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
-let loading=null;
-function ensurePeer(){
- if(typeof window.Peer==='function')return Promise.resolve(window.Peer);
- if(loading)return loading;
- loading=new Promise((resolve,reject)=>{
-  const script=document.createElement('script');
-  script.src=PEERJS_URL;
-  script.onload=()=>typeof window.Peer==='function'?resolve(window.Peer):reject(Error('PeerJS не запустился'));
-  script.onerror=()=>reject(Error('Не удалось загрузить PeerJS (проверь интернет)'));
-  document.head.appendChild(script);
- });
- return loading;
-}
 function code(){
  const bytes=new Uint8Array(5);
  crypto.getRandomValues(bytes);
