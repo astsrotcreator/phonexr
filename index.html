@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.12 Dual Phone Tracking</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.13 Markerless Tracking</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -98,12 +98,13 @@
     </section>
     <section class="card">
       <h2>04 / Внешняя камера Redmi 9</h2>
-      <div class="setting"><label for="externalMode">Использовать внешний трекинг по метке</label><input type="checkbox" id="externalMode"></div>
-      <p class="detail">Вторая камера неподвижно наблюдает за очками и передаёт приблизительные координаты по WebRTC. Потребуется квадратная метка ArUco №347 на внешней стороне оправы. Это экспериментальная система, не безопасная навигация.</p>
+      <div class="setting"><label for="externalMode">Использовать внешнюю камеру Redmi 9</label><input type="checkbox" id="externalMode"></div>
+      <div class="setting"><label for="markerlessMode">Без метки — отслеживать голову и плечи</label><input type="checkbox" id="markerlessMode" checked></div>
+      <p class="detail">В режиме без метки Redmi 9 распознаёт фигуру человека и передаёт её приблизительное положение. Внешняя камера не знает точного поворота очков — это 2D-привязка, не 6DoF. Проверять только сидя и без надетых очков.</p>
       <button id="pairExternalBtn" class="secondary" type="button">📡 Создать код для Redmi 9</button>
       <div id="externalPairCode" style="font-size:27px;letter-spacing:.12em;font-family:monospace;font-weight:800;margin:13px 0;overflow-wrap:anywhere">—</div>
       <div id="externalPairStatus" class="detail" role="status">Внешняя камера не подключена</div>
-      <p class="detail"><a href="./external-camera.html" target="_blank" rel="noopener" style="color:#71ebdf">Открыть камеру на Redmi 9</a> · <a href="./marker.html" target="_blank" rel="noopener" style="color:#71ebdf">Открыть метку №347</a></p>
+      <p class="detail"><a href="./external-body.html" target="_blank" rel="noopener" style="color:#71ebdf">Redmi 9: камера без метки</a> · <a href="./external-camera.html" target="_blank" rel="noopener" style="color:#71ebdf">Старый режим с меткой</a></p>
     </section>
     <section class="card">
       <h2>05 / Твоя заметка</h2>
@@ -184,14 +185,14 @@ $('checkARBtn').addEventListener('click',async()=>{
  $('arDiagnostic').textContent=info.join('\\n');
 });
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','externalMode','trackSize','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false,calibratingUntil:0},externalMode:false,external:{receiver:null,pose:null,lastPoseAt:0,calibrated:false,received:0,status:'не подключено',code:'',lastFrameAt:0}};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','externalMode','markerlessMode','trackSize','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false,calibratingUntil:0},externalMode:false,external:{receiver:null,pose:null,lastPoseAt:0,body:null,bodyReference:null,lastBodyAt:0,calibrated:false,received:0,status:'не подключено',code:'',lastFrameAt:0},markerlessMode:true};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
-for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
-function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.visionMode=$('visionMode').checked;s.externalMode=$('externalMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode','markerlessMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode','externalMode','markerlessMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.visionMode=$('visionMode').checked;s.externalMode=$('externalMode').checked;s.markerlessMode=$('markerlessMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
 for(const key of SETTING_KEYS){
  if(key==='visionMode'||key==='spatialMode'||key==='externalMode')continue;
  $(key).addEventListener('input',syncSettings);
@@ -211,7 +212,6 @@ $('externalMode').addEventListener('input',()=>{
 if($('externalMode').checked){$('visionMode').checked=false;$('spatialMode').checked=false}
 else if($('visionMode').checked&&$('spatialMode').checked)$('spatialMode').checked=false;
 syncSettings();
-syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
 const appInfo={launcher:{title:'PHONE XR',icon:'◈'},clock:{title:'Часы',icon:'◷'},timer:{title:'Таймер',icon:'◴'},note:{title:'Заметка',icon:'▤'},counter:{title:'Счётчик',icon:'⊕'},help:{title:'Помощь',icon:'✌'},settings:{title:'Оптика',icon:'⚙'}};
 const wdefs={launcher:[90,102,820,507],clock:[185,150,630,355],timer:[185,150,630,390],note:[154,130,690,400],counter:[185,150,630,388],help:[140,112,720,470],settings:[152,118,694,466]};
@@ -221,6 +221,7 @@ const layouts=restoreLayouts();
 function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.homeX??w.x,w.homeY??w.y,w.w,w.h]]))))}catch{}}
 function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w);
  if(s.spatial.enabled&&s.spatial.ready){w.homeX=w.x;w.homeY=w.y;anchorWindow(w)}
+ else if(s.externalMode&&s.markerlessMode){w.homeX=w.x;w.homeY=w.y}
  else if(s.externalMode&&s.external.pose){w.homeX=w.x;w.homeY=w.y;w.anchorWorld=window.ExternalTracking.anchor(s.external.pose,w.x+w.w/2,w.y+w.h/2)}
  else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
 function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
@@ -437,20 +438,44 @@ function updateExternalStatus(message){
 }
 function onExternalPacket(packet){
  const e=s.external;
- if(packet?.type==='hello'){updateExternalStatus('✅ Redmi 9 подключён; покажи метку №347');return}
- if(packet?.type==='lost'){
-  e.lastPoseAt=0;
-  updateExternalStatus('⚠️ Redmi 9 потерял метку. Окна заморожены/скрыты.');
+ if(packet?.type==='hello'){
+  updateExternalStatus(packet.tracking==='markerless'?'✅ Redmi 9 подключён • без метки':'✅ Redmi 9 подключён • метка ArUco');
   return;
  }
- if(packet?.type!=='pose'||!window.ExternalTracking?.validPose(packet))return;
+ if(packet?.type==='lost'){
+  if(s.markerlessMode)e.lastBodyAt=0;else e.lastPoseAt=0;
+  updateExternalStatus('⚠️ Redmi 9 потерял '+(s.markerlessMode?'человека':'метку')+'. Окна скрыты.');
+  return;
+ }
+ if(packet?.type==='body'){
+  if(!s.markerlessMode)return;
+  const p=packet.head,sh=packet.shoulders;
+  if(!p||typeof p.x!=='number'||typeof p.y!=='number'||
+    !Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.x>1||p.y<0||p.y>1)return;
+  if(!sh||!Number.isFinite(sh.x)||!Number.isFinite(sh.y))return;
+  if(!Number.isFinite(packet.width)||packet.width<=.015||packet.width>1)return;
+  const now=performance.now();
+  // Reject abrupt misdetections of other people or parts of the scene.
+  if(e.body&&e.lastBodyAt&&now-e.lastBodyAt<450&&Math.hypot(p.x-e.body.head.x,p.y-e.body.head.y)>.32)return;
+  const sample={head:{x:p.x,y:p.y},shoulders:{x:sh.x,y:sh.y},
+    width:packet.width,size:Number(packet.size)||packet.width*1.9,quality:packet.quality||'unknown'};
+  if(e.body&&now-e.lastBodyAt<600){
+   const mix=.50;
+   sample.head.x=e.body.head.x+(sample.head.x-e.body.head.x)*mix;
+   sample.head.y=e.body.head.y+(sample.head.y-e.body.head.y)*mix;
+  }
+  e.body=sample;e.lastBodyAt=now;e.received++;
+  if(!s.running||e.received%5===0)updateExternalStatus('✅ Redmi 9 видит тело • '+sample.quality+' • измерений: '+e.received);
+  return;
+ }
+ if(packet?.type!=='pose'||s.markerlessMode||!window.ExternalTracking?.validPose(packet))return;
  const now=performance.now();
  if(e.pose&&e.lastPoseAt&&now-e.lastPoseAt<240){
   const jump=Math.hypot(...packet.t.map((n,i)=>n-e.pose.t[i]));
-  if(jump>650){updateExternalStatus('⚠️ Отброшен подозрительный скачок координат');return}
+  if(jump>650){updateExternalStatus('⚠️ Слишком резкий скачок координат');return}
  }
  e.pose={t:packet.t,R:packet.R};e.lastPoseAt=now;e.received++;
- if(!s.running||e.received%6===0)updateExternalStatus('✅ Метка видна • '+Math.round(packet.t[2])+' мм от камеры • '+e.received+' измерений');
+ if(!s.running||e.received%6===0)updateExternalStatus('✅ Метка видна • '+Math.round(packet.t[2])+' мм от камеры');
 }
 async function pairExternal(){
  const btn=$('pairExternalBtn');
@@ -468,6 +493,19 @@ async function pairExternal(){
 $('pairExternalBtn').addEventListener('click',pairExternal);
 function recenterExternal(){
  const e=s.external;
+ if(s.markerlessMode){
+  if(!s.externalMode||!e.body||performance.now()-e.lastBodyAt>1200){
+   updateExternalStatus('Положение человека потеряно. Покажись полностью камере Redmi 9.');return;
+  }
+  e.bodyReference=JSON.parse(JSON.stringify(e.body));
+  for(const w of windows){
+   w.x=clamp(w.homeX??w.x,0,BASE_W-w.w);
+   w.y=clamp(w.homeY??w.y,0,BASE_H-w.h);
+   w.homeX=w.x;w.homeY=w.y;w.hiddenSpatial=false;
+  }
+  e.calibrated=true;updateExternalStatus('✅ Центр по фигуре сохранён. Повороты головы НЕ отслеживаются.');
+  return;
+ }
  if(!s.externalMode||!e.pose||performance.now()-e.lastPoseAt>1000){
   updateExternalStatus('Нет свежих координат от Redmi 9. Покажи метку №347.');return;
  }
@@ -483,7 +521,24 @@ function recenterExternal(){
 }
 function projectExternal(){
  if(!s.externalMode)return;
- const e=s.external,valid=!!(e.pose&&performance.now()-e.lastPoseAt<850);
+ const e=s.external;
+ if(s.markerlessMode){
+  const valid=!!(e.body&&performance.now()-e.lastBodyAt<1300);
+  if(!valid){for(const w of windows)w.hiddenSpatial=true;return}
+  if(!e.calibrated||!e.bodyReference){recenterExternal();if(!e.calibrated)return}
+  const ref=e.bodyReference,cur=e.body;
+  // 2D motion from the external fixed camera, NOT true headset rotation or room position.
+  const shiftX=clamp(-(cur.head.x-ref.head.x)*BASE_W*1.25,-1100,1100);
+  const shiftY=clamp(-(cur.head.y-ref.head.y)*BASE_H*1.05,-800,800);
+  for(const w of windows){
+   const tx=(w.homeX??w.x)+shiftX,ty=(w.homeY??w.y)+shiftY;
+   w.x+=clamp(tx-w.x,-90,90)*.65;
+   w.y+=clamp(ty-w.y,-90,90)*.65;
+   w.hiddenSpatial=false;
+  }
+  return;
+ }
+ const valid=!!(e.pose&&performance.now()-e.lastPoseAt<850);
  if(!valid){for(const w of windows)w.hiddenSpatial=true;return}
  if(!e.calibrated){recenterExternal();if(!e.calibrated)return}
  for(const w of windows){
@@ -502,7 +557,14 @@ function projectExternal(){
  }
 }
 function updateExternalDrag(w){
- if(!s.externalMode||!s.external.pose||!w)return;
+ if(!s.externalMode||!w)return;
+ if(s.markerlessMode){
+  const e=s.external,ref=e.bodyReference,cur=e.body;
+  const shiftX=ref&&cur?clamp(-(cur.head.x-ref.head.x)*BASE_W*1.25,-1100,1100):0;
+  const shiftY=ref&&cur?clamp(-(cur.head.y-ref.head.y)*BASE_H*1.05,-800,800):0;
+  w.homeX=w.x-shiftX;w.homeY=w.y-shiftY;return;
+ }
+ if(!s.external.pose)return;
  w.anchorWorld=window.ExternalTracking.anchor(s.external.pose,w.x+w.w/2,w.y+w.h/2);
  w.homeX=clamp(w.x,0,BASE_W-w.w);
  w.homeY=clamp(w.y,0,BASE_H-w.h);
@@ -586,8 +648,12 @@ function drawUIAtlas(){
   if(s.externalMode){
    activeDrawWin=null;
    actionRect(735,595,245,72,'⌖ ЦЕНТР',recenterExternal,'primary',26);
-   const fresh=s.external.lastPoseAt&&performance.now()-s.external.lastPoseAt<850;
-   text(fresh?'EXT • Redmi 9 • метка видна':'EXT • нет координат',BASE_W/2,82,21,fresh?'#91fff3':'#ffc58e',700,'center');
+   const fresh=s.markerlessMode
+    ?s.external.lastBodyAt&&performance.now()-s.external.lastBodyAt<1300
+    :s.external.lastPoseAt&&performance.now()-s.external.lastPoseAt<850;
+   text(fresh?(s.markerlessMode?'REDMI 9 • ТЕЛО В КАДРЕ • 2D':'REDMI 9 • МЕТКА 3D'):
+    (s.markerlessMode?'REDMI 9 • НЕТ ТЕЛА':'REDMI 9 • НЕТ МЕТКИ'),
+    BASE_W/2,82,21,fresh?'#91fff3':'#ffc58e',700,'center');
   }else if(s.visionMode){
    activeDrawWin=null;
    actionRect(730,595,250,72,'⟳ ПРИВЯЗАТЬ',recenterVision,'primary',25);
@@ -843,7 +909,7 @@ async function enterMode(demo){
    s.cameraStatus='КАМЕРА';
   }else{s.cameraStatus='ДЕМО';screen.classList.remove('camera-active')}
   s.demo=demo;s.trackerStatus=demo?'выкл':(s.disableTracking?'отключено':'загрузка');
-  s.external.calibrated=false;s.running=true;initialWindows();s.timerLast=performance.now();
+  s.external.calibrated=false;s.external.bodyReference=null;s.running=true;initialWindows();s.timerLast=performance.now();
   s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;s.captureMs=0;s.inferenceMs=0;s.handSamples=0;s.handSamplesStart=0;s.handDetectFPS=0;s.visualHand=null;s.lastVisualUpdate=0;s.handMisses=0;
   $('setup').classList.add('hidden');fit();
   try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
