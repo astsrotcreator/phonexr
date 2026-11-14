@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<meta name="theme-color" content="#06121c"/>
+<title>PhoneXR — бесплатная Mixed Reality</title>
+<style>
+ :root{color-scheme:dark;--bg:#071018;--card:#11202d;--line:#2b4654;--aqua:#71ebdf;--blue:#75a8ff;--muted:#a2b6c4}
+ *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:system-ui,-apple-system,Arial,sans-serif;color:#e9f9ff}
+ button,input,textarea{font:inherit}
+ .setup{position:fixed;inset:0;z-index:10;overflow:auto;background:radial-gradient(ellipse at 28% 0%,#173c51 0%,#071119 50%,#050d14 100%);padding:20px 18px max(30px,env(safe-area-inset-bottom))}
+ .container{max-width:650px;margin:auto;padding-bottom:28px}
+ .brand{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:800;letter-spacing:.18em;color:var(--aqua);text-transform:uppercase}
+ .brandlogo{width:33px;height:33px;background:#133a44;border:1px solid #5acec8;border-radius:12px;display:grid;place-items:center;font-size:20px}
+ h1{font-size:clamp(40px,10vw,72px);letter-spacing:-.065em;line-height:1.02;margin:25px 0 8px;font-weight:850}
+ h1 span{color:var(--aqua)}
+ .lead{font-size:15px;line-height:1.6;color:#c1d2dd;max-width:550px;margin:0 0 19px}
+ .metrics{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 20px}
+ .chip{border:1px solid #294b58;border-radius:100px;padding:8px 11px;color:#c3d6df;font-size:12px;background:#10232f}
+ .card{border:1px solid #294653;border-radius:18px;background:rgba(19,36,48,.8);padding:18px;margin:12px 0;box-shadow:0 10px 28px #0002}
+ .card h2{margin:0 0 12px;font-size:16px;font-weight:750}
+ .setting{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
+ .setting label{font-size:14px;color:#d6e5eb;flex:1}
+ .setting input[type=range]{width:48%;accent-color:var(--aqua)}
+ .setting input[type=checkbox]{width:24px;height:24px;accent-color:var(--aqua)}
+ .field{width:100%;border:1px solid #33515f;background:#0c1b25;border-radius:11px;color:white;padding:11px 12px;resize:vertical;min-height:55px}
+ .detail{color:var(--muted);font-size:12px;line-height:1.55;margin-top:10px}
+ .buttons{display:flex;gap:9px;flex-wrap:wrap;margin:16px 0}
+ button{cursor:pointer;border:0;border-radius:13px;padding:13px 16px;font-weight:750}
+ .primary{background:var(--aqua);color:#073139;flex:1;min-width:200px;box-shadow:0 7px 25px #3be1cb2a}
+ .secondary{background:#213a49;color:#dcebf3;border:1px solid #3a5867}
+ .danger{color:#f9a8ad}
+ #status{min-height:25px;font-size:13px;color:#b6d6e2;line-height:1.5}
+ #screen{position:fixed;inset:0;display:none;background:black;touch-action:none;overflow:hidden}
+ #view{display:block;width:100%;height:100%;touch-action:none}
+ #exitButton{position:absolute;right:5px;top:4px;border-radius:6px;padding:3px 7px;background:rgba(7,20,31,.45);color:#b9d1df;font-size:10px;opacity:.55;z-index:2}
+ #video{position:fixed;width:2px;height:2px;opacity:.001;left:-10px;top:-10px;pointer-events:none}
+ #overlayStatus{pointer-events:none;position:absolute;left:50%;transform:translateX(-50%);bottom:2px;z-index:2;color:#cce9ee;background:#09202ab3;padding:2px 8px;border-radius:9px;font-size:10px;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
+ .hidden{display:none!important}
+ @media (min-width:800px){.setup{padding-top:30px}}
+</style>
+</head>
+<body>
+<main class="setup" id="setup">
+  <div class="container">
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.1</span></div>
+    <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
+    <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
+    <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
+    <section class="card">
+      <h2>01 / Подготовка к запуску</h2>
+      <div class="detail" style="margin:0;color:#d5e9f2">Разреши доступ к задней камере. Разверни телефон горизонтально, включи VR-режим и только потом вставь его в очки. Сначала проверь всё без очков.</div>
+      <div class="buttons">
+        <button class="primary" id="startBtn">◉ Запустить PhoneXR</button>
+        <button class="secondary" id="demoBtn">Демо без камеры</button>
+      </div>
+      <div id="status" role="status">Готово к запуску. Для камеры нужна страница HTTPS или localhost.</div>
+    </section>
+    <section class="card">
+      <h2>02 / Настройки оптики</h2>
+      <div class="setting"><label for="zoom">Приближение камеры <b id="zoomText">1.00×</b></label><input type="range" id="zoom" min="1" max="1.6" step="0.05" value="1"></div>
+      <div class="setting"><label for="eyeShift">Сведение картинки <b id="eyeText">0</b></label><input type="range" id="eyeShift" min="-100" max="100" step="5" value="0"></div>
+      <div class="setting"><label for="mirror">Зеркальное изображение</label><input type="checkbox" id="mirror"></div>
+      <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
+      <div class="setting"><label for="lowPower">Экономный режим распознавания</label><input type="checkbox" id="lowPower"></div>
+      <div class="detail">Если окна двоятся в линзах — меняй сведение. Одна камера не создаёт настоящую глубину; при плохом самочувствии немедленно снимай очки.</div>
+    </section>
+    <section class="card">
+      <h2>03 / Твоя заметка</h2>
+      <textarea class="field" id="noteText" rows="2" maxlength="220" placeholder="Текст, который будет показан в виртуальном окне">Мой первый виртуальный рабочий стол 👋</textarea>
+      <div class="detail">Текст можно изменить здесь до запуска. Настройки и заметка сохраняются в браузере.</div>
+    </section>
+    <section class="card">
+      <h2>Как управлять</h2>
+      <div class="detail" style="font-size:13px;color:#dae8ef">☝ Покажи руку перед задней камерой → наведи указательный палец на кнопку → соедини указательный и большой пальцы, чтобы нажать. Захвати заголовок окна таким же жестом и перетащи. Без камеры можно попробовать всё касаниями экрана.</div>
+    </section>
+    <p class="detail">PhoneXR — прототип, не система безопасности или навигации. Не ходи и не пересекай дороги в очках: задержка и плоская камера искажают расстояние. Видео обрабатывается локально в браузере; для модели распознавания используется бесплатная внешняя загрузка.</p>
+  </div>
+</main>
+<section id="screen" aria-label="Режим VR">
+  <canvas id="view"></canvas><button id="exitButton" title="Выйти из VR">✕</button><div id="overlayStatus">Подключение камеры…</div>
+</section>
+<video id="video" autoplay playsinline muted></video>
+<script type="module">
+'use strict';
+const $ = (id) => document.getElementById(id);
+const canvas = $('view'), ctx = canvas.getContext('2d',{alpha:false}), video=$('video');
+const status=$('status'), os=$('overlayStatus');
+const BASE_W=1000, BASE_H=700;
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
+const saved=getSaved();
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);saveSettings()}
+for(const key of SETTING_KEYS)$(key).addEventListener('input',syncSettings);
+syncSettings();
+const appInfo={launcher:{title:'PHONE XR',icon:'◈'},clock:{title:'Часы',icon:'◷'},timer:{title:'Таймер',icon:'◴'},note:{title:'Заметка',icon:'▤'},counter:{title:'Счётчик',icon:'⊕'},help:{title:'Помощь',icon:'✌'},settings:{title:'Оптика',icon:'⚙'}};
+const wdefs={launcher:[90,102,820,507],clock:[185,150,630,355],timer:[185,150,630,390],note:[154,130,690,400],counter:[185,150,630,388],help:[140,112,720,470],settings:[152,118,694,466]};
+let windows=[], regions=[], activeDrawWin=null;
+function restoreLayouts(){try{return JSON.parse(localStorage.getItem('phonexr-layouts')||'{}')}catch{return {}}}
+const layouts=restoreLayouts();
+function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.x,w.y,w.w,w.h]]))))}catch{}}
+function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w)}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
+function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
+function initialWindows(){windows=[];openWindow('launcher')}
+initialWindows();
+function rrect(x,y,w,h,r,fill,stroke,lineWidth=1){ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(r,h/2,w/2));if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}}
+function text(t,x,y,size=28,color='#eafbff',weight=500,align='left'){ctx.font=`${weight} ${size}px system-ui,-apple-system,Arial`;ctx.textBaseline='middle';ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(String(t),x,y)}
+function multiLine(value,x,y,maxWidth,lineHeight,size=27,color='#d9eaf1',maxLines=5){ctx.font=`500 ${size}px system-ui`;const words=String(value).split(/\s+/);let line='',lineNum=0;for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){text(line,x,y+lineHeight*lineNum,size,color);line=word;lineNum++;if(lineNum>=maxLines-1)break}else{line=next}}if(lineNum<maxLines)text(line,x,y+lineHeight*lineNum,size,color)}
+function actionRect(x,y,w,h,label,action,kind='normal',fontSize=28){const hover=s.hand&&s.hand.x>=x&&s.hand.x<=x+w&&s.hand.y>=y&&s.hand.y<=y+h;const fill=kind==='primary'?'#257b78':(hover?'#274c60':'#1b3545');rrect(x,y,w,h,15,fill,hover?'#b3fff2':'#355a69',hover?2.5:1.3);text(label,x+w/2,y+h/2,fontSize,kind==='primary'?'#e8fffc':'#d6edf6',700,'center');regions.push({x,y,w,h,action,win:activeDrawWin})}
+function titleBar(w){const x=w.x,y=w.y,wd=w.w;rrect(x,y,wd,w.h,25,'rgba(7,27,40,.91)','#4c7989',2);ctx.save();ctx.beginPath();ctx.roundRect(x,y,wd,86,[25,25,0,0]);ctx.clip();ctx.fillStyle='#153749';ctx.fillRect(x,y,wd,86);ctx.restore();text(appInfo[w.type].icon,x+32,y+43,35,'#73e8e1',750);text(appInfo[w.type].title,x+81,y+43,34,'#e2f4fa',800);actionRect(x+wd-72,y+17,52,52,'×',()=>closeWindow(w),'normal',36);regions.push({x,y,w:wd-92,h:86,drag:w,win:w})}
+function drawLauncher(w){const {x,y,w:wd}=w;titleBar(w);text('ТВОЁ ПРОСТРАНСТВО',x+35,y+115,21,'#6de8df',800);text('Выбери окно жестом щипка',x+35,y+156,27,'#d8e8f3',500);const appList=['clock','timer','note','counter','help','settings'];const colW=(wd-92)/3;for(let i=0;i<appList.length;i++){const a=appList[i],col=i%3,row=Math.floor(i/3),bx=x+32+col*colW,by=y+196+row*126,bw=colW-18,bh=100;const hovered=s.hand&&s.hand.x>=bx&&s.hand.x<=bx+bw&&s.hand.y>=by&&s.hand.y<=by+bh;rrect(bx,by,bw,bh,17,hovered?'#1d5865':'#173847',hovered?'#84f0e9':'#345b6c',2);text(appInfo[a].icon,bx+27,by+38,38,'#77eee3',700);text(appInfo[a].title,bx+72,by+55,27,'#e8f8fd',700);regions.push({x:bx,y:by,w:bw,h:bh,action:()=>openWindow(a),win:w})}text('ПРОТОТИП 0.1    •    ВИД ИЗ ОДНОЙ КАМЕРЫ',x+34,y+w.h-25,18,'#7497a6',700)}
+function dateParts(){const d=new Date();return {d,time:d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),date:d.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}}
+function drawClock(w){titleBar(w);const d=dateParts(),cx=w.x+w.w/2;text(d.time,cx,w.y+188,78,'#f0ffff',780,'center');text(d.date,cx,w.y+270,31,'#9ebfcb',500,'center')}
+function fmtTime(n){const v=Math.max(0,Math.ceil(n));return String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0')}
+function drawTimer(w){titleBar(w);const x=w.x,y=w.y,cx=x+w.w/2;text(fmtTime(s.timerRemaining),cx,y+175,78,'#eeffff',800,'center');actionRect(x+51,y+270,135,68,'− 30',()=>{s.timerRemaining=Math.max(0,s.timerRemaining-30);s.timerLength=s.timerRemaining},'normal',31);actionRect(x+206,y+270,218,68,s.timerRunning?'Пауза':'Старт',()=>{s.timerRunning=!s.timerRunning;s.timerLast=performance.now()},'primary',31);actionRect(x+443,y+270,135,68,'+ 30',()=>{s.timerRemaining+=30;s.timerLength=s.timerRemaining},'normal',31)}
+function drawNote(w){titleBar(w);rrect(w.x+30,w.y+112,w.w-60,w.h-148,18,'#173443','#315366');multiLine(s.note||'Нет заметки. Выйди из VR, чтобы изменить текст.',w.x+55,w.y+159,w.w-112,46,30,'#e2f5f8',5)}
+function drawCounter(w){titleBar(w);text(String(s.counter),w.x+w.w/2,w.y+177,89,'#eeffff',800,'center');actionRect(w.x+44,w.y+260,155,71,'− 1',()=>s.counter--,'normal',32);actionRect(w.x+222,w.y+260,185,71,'Сброс',()=>s.counter=0,'normal',29);actionRect(w.x+433,w.y+260,155,71,'+ 1',()=>s.counter++,'primary',32)}
+function drawHelp(w){titleBar(w);const rows=['1. Поднеси ладонь к задней камере.','2. Наведи указательный палец на кнопку.','3. Соедини большой и указательный.','4. Захвати верхнюю полоску окна — двигай.','5. Открой новые окна через PHONE XR.'];rows.forEach((a,i)=>text(a,w.x+40,w.y+145+i*57,27,'#d1edf2',i===0?750:500))}
+function drawSettings(w){titleBar(w);const x=w.x,y=w.y;const items=[['Сдвиг интерфейса: '+s.eyeShift,()=>{$('eyeShift').value=clamp(s.eyeShift-10,-100,100);syncSettings()},()=>{$('eyeShift').value=clamp(s.eyeShift+10,-100,100);syncSettings()}],['Зум камеры: '+s.zoom.toFixed(2)+'×',()=>{$('zoom').value=clamp(s.zoom-.05,1,1.6);syncSettings()},()=>{$('zoom').value=clamp(s.zoom+.05,1,1.6);syncSettings()}]];for(let i=0;i<items.length;i++){const rY=y+115+i*116;text(items[i][0],x+35,rY,28,'#d7ecf6',700);actionRect(x+w.w-206,rY-28,75,67,'−',items[i][1],'normal',36);actionRect(x+w.w-115,rY-28,75,67,'+',items[i][2],'normal',36)}actionRect(x+34,y+340,290,68,s.showSkeleton?'Точки руки: ВКЛ':'Точки руки: ВЫКЛ',()=>{$('showSkeleton').checked=!s.showSkeleton;syncSettings()},'normal',24);actionRect(x+340,y+340,300,68,'Открыть меню',()=>openWindow('launcher'),'primary',25)}
+function drawWindow(w){activeDrawWin=w;switch(w.type){case 'launcher':drawLauncher(w);break;case 'clock':drawClock(w);break;case 'timer':drawTimer(w);break;case 'note':drawNote(w);break;case 'counter':drawCounter(w);break;case 'help':drawHelp(w);break;case 'settings':drawSettings(w);break}}
+const HAND_LINES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function cropForEye(eyeW,eyeH){const vw=video.videoWidth||960,vh=video.videoHeight||540,ar=eyeW/eyeH;let sw=vw,sh=vh;if(vw/vh>ar)sw=vh*ar;else sh=vw/ar;sw/=s.zoom;sh/=s.zoom;const sx=(vw-sw)/2,sy=(vh-sh)/2;return {sx,sy,sw,sh,vw,vh}}
+function pointToScreen(p){if(!p||!canvas.width)return null;const dim=cropForEye(canvas.width/2,canvas.height);const x=(p.x*dim.vw-dim.sx)/dim.sw*BASE_W;const y=(p.y*dim.vh-dim.sy)/dim.sh*BASE_H;return {x:s.mirror?BASE_W-x:x,y}}
+function drawCamera(eye){if(s.demo||video.readyState<2){const g=ctx.createLinearGradient(0,0,BASE_W,BASE_H);g.addColorStop(0,'#0d3144');g.addColorStop(.55,'#103441');g.addColorStop(1,'#07161f');ctx.fillStyle=g;ctx.fillRect(0,0,BASE_W,BASE_H);for(let i=0;i<15;i++){ctx.strokeStyle='#7adbd111';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo((i*110+s.frame*.08)%BASE_W,0);ctx.lineTo(i*110+120,BASE_H);ctx.stroke()}text('ДЕМО • НЕТ КАМЕРЫ',BASE_W/2,640,21,'#7993a4',700,'center');return}
+ const crop=cropForEye(canvas.width/2,canvas.height);ctx.save();if(s.mirror){ctx.translate(BASE_W,0);ctx.scale(-1,1)}ctx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,BASE_W,BASE_H);ctx.restore();ctx.fillStyle='rgba(0,13,25,.09)';ctx.fillRect(0,0,BASE_W,BASE_H)
+}
+function drawHand(){if(!s.hand||performance.now()-s.handSeen>650)return;
+ if(s.showSkeleton&&s.hand.landmarks){const pts=s.hand.landmarks.map(pointToScreen);ctx.lineWidth=4;ctx.strokeStyle='rgba(122,255,231,.73)';for(const [a,b] of HAND_LINES){if(!pts[a]||!pts[b])continue;ctx.beginPath();ctx.moveTo(pts[a].x,pts[a].y);ctx.lineTo(pts[b].x,pts[b].y);ctx.stroke()}for(let i=0;i<pts.length;i++){const p=pts[i];rrect(p.x-4,p.y-4,8,8,4,'#cffdf3')}}
+ const {x,y}=s.hand;ctx.beginPath();ctx.arc(x,y,s.pinching?26:20,0,Math.PI*2);ctx.fillStyle=s.pinching?'rgba(87,250,218,.30)':'rgba(130,235,255,.13)';ctx.fill();ctx.lineWidth=5;ctx.strokeStyle=s.pinching?'#fff5a4':'#a5ffff';ctx.stroke();ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);ctx.fillStyle='#fbffff';ctx.fill();
+}
+function renderEye(eye,eyeW,h){ctx.save();ctx.beginPath();ctx.rect(eye*eyeW,0,eyeW,h);ctx.clip();ctx.translate(eye*eyeW,0);ctx.scale(eyeW/BASE_W,h/BASE_H);drawCamera(eye);ctx.save();ctx.translate(eye===0?s.eyeShift:-s.eyeShift,0);
+ regions=[];for(const w of windows)drawWindow(w);
+ drawHand();ctx.restore();
+ const grad=ctx.createRadialGradient(BASE_W/2,BASE_H/2,130,BASE_W/2,BASE_H/2,700);grad.addColorStop(0,'#0000');grad.addColorStop(.8,'#00000020');grad.addColorStop(1,'#0000009a');ctx.fillStyle=grad;ctx.fillRect(0,0,BASE_W,BASE_H);
+ text('PHONE XR  •  '+(s.demo?'ДЕМО':s.cameraStatus)+'  •  РУКА '+s.trackerStatus,26,35,20,'#e4fbff',650);
+ if(s.hand&&performance.now()-s.handSeen<650)text(s.pinching?'ЩИПОК':'РУКА В КАДРЕ',BASE_W/2,665,21,'#d3fff5',650,'center');else text('Покажи ладонь перед камерой',BASE_W/2,665,20,'#c1dbe5',600,'center');
+ ctx.restore();}
+function fit(){const ratio=Math.min(window.devicePixelRatio||1,1.5);const w=innerWidth,h=innerHeight;canvas.width=Math.max(2,Math.floor(w*ratio));canvas.height=Math.max(2,Math.floor(h*ratio));}
+window.addEventListener('resize',fit);fit();
+function render(now){if(!s.running)return;s.frame++;if(!s.demo)runTracking(now);if(s.timerRunning){const elapsed=(now-s.timerLast)/1000;s.timerLast=now;s.timerRemaining=Math.max(0,s.timerRemaining-elapsed);if(s.timerRemaining<=0)s.timerRunning=false}
+ if(!s.lastDraw||now-s.lastDraw>27){ctx.clearRect(0,0,canvas.width,canvas.height);const ww=canvas.width/2;renderEye(0,ww,canvas.height);renderEye(1,ww,canvas.height);ctx.fillStyle='#07151c';ctx.fillRect(ww-2,0,4,canvas.height);s.lastDraw=now}
+ if(s.hand&&now-s.handSeen>650){if(s.pinching)endPinch();s.hand=null;s.pinching=false}
+ requestAnimationFrame(render)}
+function hit(x,y){for(let i=windows.length-1;i>=0;i--){const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
+function beginPinch(){if(!s.hand)return;const target=hit(s.hand.x,s.hand.y);if(!target){s.hold=null;return}const w=target.win;if(w){windows.splice(windows.indexOf(w),1);windows.push(w)}s.hold={target,initX:s.hand.x,initY:s.hand.y,ox:w?.x,oy:w?.y,moved:false}}
+function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true}
+function endPinch(){const h=s.hold;s.hold=null;if(!h)return;if(!h.moved&&h.target.action){h.target.action()}else if(h.moved)saveLayouts()}
+function setHand(landmarks){if(!landmarks||!landmarks.length){if(s.pinching)endPinch();s.hand=null;s.pinching=false;s.pinchCandidate=0;s.releaseCandidate=0;return}
+ const raw=pointToScreen(landmarks[8]);if(!raw||!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return;const d=(a,b)=>Math.hypot(landmarks[a].x-landmarks[b].x,landmarks[a].y-landmarks[b].y);const ratio=d(4,8)/Math.max(.02,d(5,17));const pinch=ratio<.48;const release=ratio>.68;
+ if(!s.hand)s.hand={x:raw.x,y:raw.y};else{s.hand.x+=(raw.x-s.hand.x)*.7;s.hand.y+=(raw.y-s.hand.y)*.7} s.hand.landmarks=landmarks;s.handSeen=performance.now();
+ if(!s.pinching){s.pinchCandidate=pinch?s.pinchCandidate+1:0;if(s.pinchCandidate>=2){s.pinching=true;s.releaseCandidate=0;beginPinch()}}
+ else{movePinch();s.releaseCandidate=release?s.releaseCandidate+1:0;if(s.releaseCandidate>=2){s.pinching=false;s.pinchCandidate=0;endPinch()}}
+}
+async function loadHandTracking(sessionId){if(s.demo)return;s.trackerStatus='загрузка';os.textContent='Камера работает • загружаю распознавание рук…';try{
+ const {HandLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
+ const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
+ const options={baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.55,minHandPresenceConfidence:.5,minTrackingConfidence:.5};
+ try{s.tracker=await HandLandmarker.createFromOptions(vision,{...options,baseOptions:{...options.baseOptions,delegate:'GPU'}})}catch(e){s.tracker=await HandLandmarker.createFromOptions(vision,{...options,baseOptions:{...options.baseOptions,delegate:'CPU'}})}
+ if(sessionId!==s.sessionId||!s.running){s.tracker?.close?.();s.tracker=null;return} s.trackerStatus='готово';os.textContent='Камера и жесты готовы • наведи палец, затем щипок';
+ }catch(err){s.tracker=null;s.trackerStatus='ошибка';os.textContent='Жесты не загрузились: проверь интернет • сенсорный экран работает';console.error('MediaPipe load failed:',err)}}
+function runTracking(now){if(!s.tracker||!video.videoWidth||video.readyState<2)return;if(now-s.lastDetected<(s.lowPower?165:90))return;if(video.currentTime===s.lastVideoTime)return;s.lastDetected=now;s.lastVideoTime=video.currentTime;try{const result=s.tracker.detectForVideo(video,now);setHand(result.landmarks?.[0]||null)}catch(e){s.trackerStatus='ошибка';console.error(e);s.tracker?.close?.();s.tracker=null;os.textContent='Ошибка распознавания руки • можно пользоваться касаниями'}}
+async function enterMode(demo){if(s.running)return;const sessionId=++s.sessionId;syncSettings();status.textContent='Открываю камеру…';$('startBtn').disabled=true;$('demoBtn').disabled=true;try{
+ if(!demo){if(!navigator.mediaDevices?.getUserMedia)throw new Error('Камера недоступна: открой страницу через HTTPS в Chrome.');const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},frameRate:{ideal:24,max:30}}});video.srcObject=stream;await video.play();s.cameraStatus='КАМЕРА';}
+ else s.cameraStatus='ДЕМО';s.demo=demo;s.trackerStatus=demo?'выкл':'загрузка';s.running=true;initialWindows();s.timerLast=performance.now();$('setup').classList.add('hidden');$('screen').style.display='block';fit();
+ try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
+ try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
+ os.textContent=demo?'Демо: управляй окнами касанием экрана':'Камера запущена • загружаю распознавание руки';requestAnimationFrame(render);if(!demo)loadHandTracking(sessionId);}
+ catch(err){status.innerText='Не удалось запустить: '+(err?.message||err)+' Попробуй Chrome, HTTPS и разрешение камеры.';console.error(err)}finally{$('startBtn').disabled=false;$('demoBtn').disabled=false}}
+async function leaveMode(){s.sessionId++;s.running=false;s.hand=null;s.pinching=false;s.hold=null;s.tracker?.close?.();s.tracker=null;video.pause();if(video.srcObject){for(const t of video.srcObject.getTracks())t.stop();video.srcObject=null;}try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}$('screen').style.display='none';$('setup').classList.remove('hidden');status.textContent='VR остановлен. Камера выключена.';saveLayouts()}
+$('startBtn').addEventListener('click',()=>enterMode(false));$('demoBtn').addEventListener('click',()=>enterMode(true));$('exitButton').addEventListener('click',leaveMode);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&s.running)leaveMode()});
+let touchHold=null;function touchCoord(e){const r=canvas.getBoundingClientRect();const x=e.clientX-r.left, y=e.clientY-r.top;const eye=(x>=r.width/2)?1:0;return {x:((x-eye*r.width/2)/(r.width/2))*BASE_W-(eye===0?s.eyeShift:-s.eyeShift),y:(y/r.height)*BASE_H}}
+canvas.addEventListener('pointerdown',e=>{if(!s.running)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);const p=touchCoord(e),target=hit(p.x,p.y);if(target?.win){windows.splice(windows.indexOf(target.win),1);windows.push(target.win)}touchHold={id:e.pointerId,target,x:p.x,y:p.y,ox:target?.win?.x,oy:target?.win?.y,moved:false}});
+canvas.addEventListener('pointermove',e=>{if(!touchHold||touchHold.id!==e.pointerId)return;const p=touchCoord(e);if(touchHold.target?.drag){const w=touchHold.target.drag,dx=p.x-touchHold.x,dy=p.y-touchHold.y;w.x=clamp(touchHold.ox+dx,0,BASE_W-w.w);w.y=clamp(touchHold.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>10)touchHold.moved=true}});
+function releaseTouch(e){if(!touchHold||touchHold.id!==e.pointerId)return;if(!touchHold.moved&&touchHold.target?.action)touchHold.target.action();if(touchHold.moved)saveLayouts();touchHold=null}
+canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',()=>touchHold=null);
+window.addEventListener('beforeunload',()=>{if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
+</script>
+</body>
+</html>
