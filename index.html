@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.6 Smooth Tracking</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.7 AR Space</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -81,11 +81,12 @@
       <div class="setting"><label for="eyeShift">Сведение картинки <b id="eyeText">0</b></label><input type="range" id="eyeShift" min="-100" max="100" step="5" value="0"></div>
       <div class="setting"><label for="mirror">Зеркальное изображение</label><input type="checkbox" id="mirror"></div>
       <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
+<div class="setting"><label for="spatialMode">AR-пространство: фиксировать окна по направлению</label><input type="checkbox" id="spatialMode"></div>
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">В v0.6 скелет и курсор сглаживаются между результатами распознавания. «ИИ/с» — настоящая частота распознавания, а не FPS камеры. Можно выключить точки руки, оставив работающие жесты.</div>
-      <div class="detail">Если окна двоятся в линзах — меняй сведение. Одна камера не создаёт настоящую глубину; при плохом самочувствии немедленно снимай очки.</div>
+      <div class="detail">AR Space v0.7 использует гироскоп для фиксации окон по направлению. Повороты головы отслеживаются; перемещение в пространстве — нет. Для возврата окон будет кнопка «ЦЕНТР».</div>
+      <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
       <h2>03 / Твоя заметка</h2>
@@ -149,14 +150,14 @@ $('testCameraBtn').addEventListener('click',async()=>{
 $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,yaw:0,pitch:0,lastEvent:0}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
-for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
-function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';updateCameraVisual();saveSettings()}
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';updateCameraVisual();saveSettings()}
 for(const key of SETTING_KEYS)$(key).addEventListener('input',syncSettings);
 syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
@@ -165,10 +166,10 @@ const wdefs={launcher:[90,102,820,507],clock:[185,150,630,355],timer:[185,150,63
 let windows=[], regions=[], activeDrawWin=null;
 function restoreLayouts(){try{return JSON.parse(localStorage.getItem('phonexr-layouts')||'{}')}catch{return {}}}
 const layouts=restoreLayouts();
-function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.x,w.y,w.w,w.h]]))))}catch{}}
-function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w)}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
+function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.homeX??w.x,w.homeY??w.y,w.w,w.h]]))))}catch{}}
+function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w);if(s.spatial.enabled&&s.spatial.ready){w.homeX=w.x;w.homeY=w.y;anchorWindow(w)}}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
 function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
-function initialWindows(){windows=[];openWindow('launcher')}
+function initialWindows(){windows=[];openWindow('launcher');s.spatial.anchored=false}
 initialWindows();
 function rrect(x,y,w,h,r,fill,stroke,lineWidth=1){ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(r,h/2,w/2));if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}}
 function text(t,x,y,size=28,color='#eafbff',weight=500,align='left'){ctx.font=`${weight} ${size}px system-ui,-apple-system,Arial`;ctx.textBaseline='middle';ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(String(t),x,y)}
