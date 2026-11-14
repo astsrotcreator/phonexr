@@ -221,6 +221,7 @@ const layouts=restoreLayouts();
 function saveLayouts(){try{localStorage.setItem('phonexr-layouts',JSON.stringify(Object.fromEntries(windows.map(w=>[w.type,[w.homeX??w.x,w.homeY??w.y,w.w,w.h]]))))}catch{}}
 function openWindow(type){if(!appInfo[type])return;let w=windows.find(w=>w.type===type);if(!w){const v=layouts[type]||wdefs[type];w={type,x:clamp(v[0],0,BASE_W-220),y:clamp(v[1],0,BASE_H-110),w:v[2],h:v[3]};w.x=clamp(w.x,0,BASE_W-w.w);w.y=clamp(w.y,0,BASE_H-w.h);windows.push(w);
  if(s.spatial.enabled&&s.spatial.ready){w.homeX=w.x;w.homeY=w.y;anchorWindow(w)}
+ else if(s.externalMode&&s.external.pose){w.homeX=w.x;w.homeY=w.y;w.anchorWorld=window.ExternalTracking.anchor(s.external.pose,w.x+w.w/2,w.y+w.h/2)}
  else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}else{windows.splice(windows.indexOf(w),1);windows.push(w)}return w}
 function closeWindow(w){windows=windows.filter(x=>x!==w);if(!windows.length)openWindow('launcher')}
 function initialWindows(){windows=[];openWindow('launcher');s.spatial.anchored=false}
@@ -335,7 +336,7 @@ function projectSpatial(){
   w.y=BASE_H/2-(dir.y/-dir.z)*ky-w.h/2;
  }
 }
-function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w);else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}
+function updateSpatialDrag(w){if(s.externalMode)updateExternalDrag(w);else if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w);else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}
 
 const VISION_W=160,VISION_H=120;
 const visionFallback=document.createElement('canvas');
@@ -427,6 +428,85 @@ function projectVision(){
   w.x=w.homeX+p.shiftX;w.y=w.homeY+p.shiftY;
  }
 }
+
+// External camera: fixed Redmi 9 estimates headset marker pose.
+// Keep all windows hidden when tracking is stale or the marker is occluded.
+function updateExternalStatus(message){
+ const e=s.external;e.status=message;
+ $('externalPairStatus').textContent=message;
+}
+function onExternalPacket(packet){
+ const e=s.external;
+ if(packet?.type==='hello'){updateExternalStatus('✅ Redmi 9 подключён; покажи метку №347');return}
+ if(packet?.type==='lost'){
+  e.lastPoseAt=0;
+  updateExternalStatus('⚠️ Redmi 9 потерял метку. Окна заморожены/скрыты.');
+  return;
+ }
+ if(packet?.type!=='pose'||!window.ExternalTracking?.validPose(packet))return;
+ const now=performance.now();
+ if(e.pose&&e.lastPoseAt&&now-e.lastPoseAt<240){
+  const jump=Math.hypot(...packet.t.map((n,i)=>n-e.pose.t[i]));
+  if(jump>650){updateExternalStatus('⚠️ Отброшен подозрительный скачок координат');return}
+ }
+ e.pose={t:packet.t,R:packet.R};e.lastPoseAt=now;e.received++;
+ if(!s.running||e.received%6===0)updateExternalStatus('✅ Метка видна • '+Math.round(packet.t[2])+' мм от камеры • '+e.received+' измерений');
+}
+async function pairExternal(){
+ const btn=$('pairExternalBtn');
+ if(!window.ExternalTracking){updateExternalStatus('Не загрузился модуль внешней камеры. Обнови страницу.');return}
+ btn.disabled=true;updateExternalStatus('Подключаю PeerJS...');
+ try{
+  if(!s.external.receiver)s.external.receiver=window.ExternalTracking.createReceiver(onExternalPacket,updateExternalStatus);
+  const token=await s.external.receiver.start();
+  s.external.code=token;
+  $('externalPairCode').textContent=token.toUpperCase();
+  $('externalMode').checked=true;$('visionMode').checked=false;$('spatialMode').checked=false;syncSettings();
+ }catch(err){updateExternalStatus('❌ Не получилось создать пару: '+(err?.message||err))}
+ finally{btn.disabled=false}
+}
+$('pairExternalBtn').addEventListener('click',pairExternal);
+function recenterExternal(){
+ const e=s.external;
+ if(!s.externalMode||!e.pose||performance.now()-e.lastPoseAt>1000){
+  updateExternalStatus('Нет свежих координат от Redmi 9. Покажи метку №347.');return;
+ }
+ for(const w of windows){
+  w.x=clamp(w.homeX??w.x,0,BASE_W-w.w);
+  w.y=clamp(w.homeY??w.y,0,BASE_H-w.h);
+  w.homeX=w.x;w.homeY=w.y;
+  w.anchorWorld=window.ExternalTracking.anchor(e.pose,w.x+w.w/2,w.y+w.h/2);
+  w.hiddenSpatial=false;
+ }
+ e.calibrated=true;
+ updateExternalStatus('✅ Калибровка сделана, окна закреплены относительно внешней камеры');
+}
+function projectExternal(){
+ if(!s.externalMode)return;
+ const e=s.external,valid=!!(e.pose&&performance.now()-e.lastPoseAt<850);
+ if(!valid){for(const w of windows)w.hiddenSpatial=true;return}
+ if(!e.calibrated){recenterExternal();if(!e.calibrated)return}
+ for(const w of windows){
+  if(!w.anchorWorld){
+   w.anchorWorld=window.ExternalTracking.anchor(e.pose,(w.x+w.w/2),(w.y+w.h/2));
+  }
+  const pos=window.ExternalTracking.project(e.pose,w.anchorWorld);
+  if(!pos.visible||!Number.isFinite(pos.x)||!Number.isFinite(pos.y)){
+   w.hiddenSpatial=true;continue;
+  }
+  w.hiddenSpatial=false;
+  const tx=pos.x-w.w/2,ty=pos.y-w.h/2;
+  // Gentle visual smoothing. Pose itself is never predicted when tracking is lost.
+  w.x+=clamp(tx-w.x,-220,220)*.70;
+  w.y+=clamp(ty-w.y,-200,200)*.70;
+ }
+}
+function updateExternalDrag(w){
+ if(!s.externalMode||!s.external.pose||!w)return;
+ w.anchorWorld=window.ExternalTracking.anchor(s.external.pose,w.x+w.w/2,w.y+w.h/2);
+ w.homeX=clamp(w.x,0,BASE_W-w.w);
+ w.homeY=clamp(w.y,0,BASE_H-w.h);
+}
 function rrect(x,y,w,h,r,fill,stroke,lineWidth=1){ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(r,h/2,w/2));if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}}
 function text(t,x,y,size=28,color='#eafbff',weight=500,align='left'){ctx.font=`${weight} ${size}px system-ui,-apple-system,Arial`;ctx.textBaseline='middle';ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(String(t),x,y)}
 function multiLine(value,x,y,maxWidth,lineHeight,size=27,color='#d9eaf1',maxLines=5){ctx.font=`500 ${size}px system-ui`;const words=String(value).split(/\s+/);let line='',lineNum=0;for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){text(line,x,y+lineHeight*lineNum,size,color);line=word;lineNum++;if(lineNum>=maxLines-1)break}else{line=next}}if(lineNum<maxLines)text(line,x,y+lineHeight*lineNum,size,color)}
@@ -503,7 +583,12 @@ function drawUIAtlas(){
   ctx.setTransform(w/BASE_W,0,0,height/BASE_H,0,0);
   if(s.demo)drawCamera(0);
   regions=[];for(const win of windows){if(!win.hiddenSpatial)drawWindow(win)}
-  if(s.visionMode){
+  if(s.externalMode){
+   activeDrawWin=null;
+   actionRect(735,595,245,72,'⌖ ЦЕНТР',recenterExternal,'primary',26);
+   const fresh=s.external.lastPoseAt&&performance.now()-s.external.lastPoseAt<850;
+   text(fresh?'EXT • Redmi 9 • метка видна':'EXT • нет координат',BASE_W/2,82,21,fresh?'#91fff3':'#ffc58e',700,'center');
+  }else if(s.visionMode){
    activeDrawWin=null;
    actionRect(730,595,250,72,'⟳ ПРИВЯЗАТЬ',recenterVision,'primary',25);
    text('AR-камера • '+s.vision.status+' • '+s.vision.points+' точек • '+s.vision.quality+'%',BASE_W/2,82,20,s.vision.visible?'#91fff3':'#ffcf89',700,'center');
@@ -531,6 +616,7 @@ function render(now){if(!s.running)return;s.frame++;if(!s.demo){runTracking(now)
   smoothHandVisual(now);
   projectVision();
   projectSpatial();
+  projectExternal();
   drawUIAtlas();
    ctx.clearRect(0,0,canvas.width,canvas.height);
    const ww=canvas.width/2;renderEye(0,ww,canvas.height);renderEye(1,ww,canvas.height);
@@ -544,7 +630,7 @@ function render(now){if(!s.running)return;s.frame++;if(!s.demo){runTracking(now)
  }
  if(s.hand&&now-s.handSeen>650){if(s.pinching)endPinch();s.hand=null;s.pinching=false}
  requestAnimationFrame(render)}
-function hit(x,y){if(s.visionMode&&x>=730&&x<=980&&y>=595&&y<=667)return {action:recenterVision,win:null};if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){if(windows[i].hiddenSpatial)continue;const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
+function hit(x,y){if(s.externalMode&&x>=735&&x<=980&&y>=595&&y<=667)return {action:recenterExternal,win:null};if(s.visionMode&&x>=730&&x<=980&&y>=595&&y<=667)return {action:recenterVision,win:null};if(s.spatial.enabled&&x>=760&&x<=980&&y>=595&&y<=667)return {action:recenterSpatial,win:null};for(let i=windows.length-1;i>=0;i--){if(windows[i].hiddenSpatial)continue;const w=windows[i];if(x>=w.x&&x<=w.x+w.w&&y>=w.y&&y<=w.y+w.h){if(x>=w.x+w.w-72&&x<=w.x+w.w-20&&y>=w.y+17&&y<=w.y+69)return {action:()=>closeWindow(w),win:w};if(y<=w.y+86)return {drag:w,win:w};for(let j=regions.length-1;j>=0;j--){const r=regions[j];if(r.win===w&&r.action&&x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return {action:r.action,win:w}}return {win:w}}}return null}
 function beginPinch(){if(!s.hand)return;const target=hit(s.hand.x,s.hand.y);if(!target){s.hold=null;return}const w=target.win;if(w){windows.splice(windows.indexOf(w),1);windows.push(w)}s.hold={target,initX:s.hand.x,initY:s.hand.y,ox:w?.x,oy:w?.y,moved:false}}
 function movePinch(){const h=s.hold;if(!h||!h.target.drag||!s.hand)return;const w=h.target.drag,dx=s.hand.x-h.initX,dy=s.hand.y-h.initY;w.x=clamp(h.ox+dx,0,BASE_W-w.w);w.y=clamp(h.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>9)h.moved=true;updateSpatialDrag(w)}
 function endPinch(){const h=s.hold;s.hold=null;if(!h)return;if(!h.moved&&h.target.action){h.target.action()}else if(h.moved)saveLayouts()}
@@ -757,7 +843,7 @@ async function enterMode(demo){
    s.cameraStatus='КАМЕРА';
   }else{s.cameraStatus='ДЕМО';screen.classList.remove('camera-active')}
   s.demo=demo;s.trackerStatus=demo?'выкл':(s.disableTracking?'отключено':'загрузка');
-  s.running=true;initialWindows();s.timerLast=performance.now();
+  s.external.calibrated=false;s.running=true;initialWindows();s.timerLast=performance.now();
   s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;s.captureMs=0;s.inferenceMs=0;s.handSamples=0;s.handSamplesStart=0;s.handDetectFPS=0;s.visualHand=null;s.lastVisualUpdate=0;s.handMisses=0;
   $('setup').classList.add('hidden');fit();
   try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
@@ -781,7 +867,7 @@ canvas.addEventListener('pointerdown',e=>{if(!s.running)return;e.preventDefault(
 canvas.addEventListener('pointermove',e=>{if(!touchHold||touchHold.id!==e.pointerId)return;const p=touchCoord(e);if(touchHold.target?.drag){const w=touchHold.target.drag,dx=p.x-touchHold.x,dy=p.y-touchHold.y;w.x=clamp(touchHold.ox+dx,0,BASE_W-w.w);w.y=clamp(touchHold.oy+dy,0,BASE_H-w.h);if(Math.hypot(dx,dy)>10)touchHold.moved=true;updateSpatialDrag(w)}});
 function releaseTouch(e){if(!touchHold||touchHold.id!==e.pointerId)return;if(!touchHold.moved&&touchHold.target?.action)touchHold.target.action();if(touchHold.moved)saveLayouts();touchHold=null}
 canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',()=>touchHold=null);
-window.addEventListener('beforeunload',()=>{stopCameraTest();stopVision();stopSpatial();if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
+window.addEventListener('beforeunload',()=>{s.external.receiver?.stop();stopCameraTest();stopVision();stopSpatial();if(video.srcObject)for(const t of video.srcObject.getTracks())t.stop()});
 </script>
 </body>
 </html>
