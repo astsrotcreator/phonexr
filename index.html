@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.10 Camera AR Lite</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.11 Scene Anchors</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -87,7 +87,7 @@
 <div class="setting"><label for="trackSize">Качество распознавания руки <b id="trackSizeText">224px</b></label><input type="range" id="trackSize" min="160" max="320" step="32" value="224"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">v0.10: AR по камере пытается удерживать окна на видимых деталях изображения. Наведи камеру на текстурированную стену или предметы, нажми «ПРИВЯЗАТЬ» и медленно поверни телефон. При потере ориентиров окна останутся на месте. Это только 2D, не 6DoF/SLAM.</div>
+      <div class="detail">v0.11: камера запоминает исходные детали в момент привязки. Если ты отвернёшься и ориентиры исчезнут, окно пропадёт из кадра. При возвращении камера попытается найти те же детали и восстановить окно. Это экспериментальная 2D-привязка, не SLAM и не безопасный AR для ходьбы.</div>
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
@@ -175,7 +175,7 @@ $('checkARBtn').addEventListener('click',async()=>{
 });
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','trackSize','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0}};
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0,visible:true,referenceCaptured:false}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
@@ -321,7 +321,7 @@ function projectSpatial(){
 }
 function updateSpatialDrag(w){if(s.spatial.enabled&&s.spatial.ready)anchorWindow(w);else if(s.vision.enabled){w.homeX=w.x-s.vision.shiftX;w.homeY=w.y-s.vision.shiftY}}
 
-const VISION_W=128,VISION_H=96;
+const VISION_W=160,VISION_H=120;
 const visionFallback=document.createElement('canvas');
 visionFallback.width=VISION_W;visionFallback.height=VISION_H;
 const visionFallbackCtx=visionFallback.getContext('2d',{alpha:false});
@@ -332,48 +332,61 @@ function recenterVision(){
   w.y=clamp(w.homeY??w.y,0,BASE_H-w.h);
   w.homeX=w.x;w.homeY=w.y;w.hiddenSpatial=false;
  }
- p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='калибровка';
+ p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='калибровка';p.visible=true;
  p.awaitingReset=true;if(p.worker)p.worker.postMessage({type:'reset'});else p.awaitingReset=false;
 }
 function startVision(sid){
  const p=s.vision;
  p.enabled=!!s.visionMode;p.ready=false;p.busy=false;p.worker=null;p.awaitingReset=false;
  p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.lastCapture=0;p.lastVideoTime=-1;
- p.quality=0;p.points=0;p.status='загрузка';
+ p.quality=0;p.points=0;p.visible=true;p.status='загрузка';
  if(!p.enabled)return;
  if(!window.Worker||!window.createImageBitmap){p.enabled=false;p.status='не поддерживается';return}
  try{
-  const worker=new Worker('./vision-anchor-worker.js',{type:'module'});
+  const worker=new Worker('./vision-anchor-v11.js',{type:'module'});
   p.worker=worker;p.ready=true;p.status='ищу ориентиры';
   worker.onmessage=({data})=>{
    if(s.sessionId!==sid||!s.running||p.worker!==worker)return;
    if(data.type==='flow'){
     p.busy=false;
-    if(p.awaitingReset)return;p.lastEvent=performance.now();p.points=data.points||0;
-    p.quality=Math.round((data.quality||0)*100);p.processingMs=data.processingMs||0;
-    p.status=data.status==='tracking'?'слежение':data.status==='init'?'ищу детали':
-      data.status==='reacquire'?'потеряны ориентиры':'неустойчиво';
-    if(data.status==='tracking'&&data.quality>=.63&&data.points>=5){
-     // Reject single-pixel jitter from camera exposure noise.
-     const dx=Math.abs(data.dx)<1.1?0:data.dx;
-     const dy=Math.abs(data.dy)<1.1?0:data.dy;
-     p.targetX=clamp(p.targetX+clamp(dx,-14,14)*BASE_W/VISION_W,-4000,4000);
-     p.targetY=clamp(p.targetY+clamp(dy,-14,14)*BASE_H/VISION_H,-2600,2600);
+    if(p.awaitingReset)return;
+    p.lastEvent=performance.now();
+    p.points=data.points||0;
+    p.quality=Math.round((data.quality||0)*100);
+    p.processingMs=data.processingMs||0;
+    p.visible=data.visible!==false;
+    const statuses={
+     init:'запомнил ориентиры',
+     tracking:'закреплено на поверхности',
+     relocalized:'исходная поверхность найдена!',
+     lost:'ориентиры потеряны • окно вне кадра',
+     verifying:'проверяю возвращение',
+     'no-features':'мало деталей • привяжи на контрастном фоне'
+    };
+    p.status=statuses[data.status]||'поиск ориентиров';
+    if(Number.isFinite(data.offsetX)&&Number.isFinite(data.offsetY)){
+     const crop=cropForEye(canvas.width/2,canvas.height);
+     const scaleX=BASE_W*(video.videoWidth||640)/(VISION_W*crop.sw);
+     const scaleY=BASE_H*(video.videoHeight||480)/(VISION_H*crop.sh);
+     const x=s.mirror?-data.offsetX:data.offsetX;
+     // Absolute coordinates relative to the ORIGINAL reference frame.
+     p.targetX=clamp(x*scaleX,-4000,4000);
+     p.targetY=clamp(data.offsetY*scaleY,-2600,2600);
     }
    }else if(data.type==='error'){
-    p.busy=false;p.status='ошибка: '+String(data.message||'').slice(0,35);
+    p.busy=false;p.visible=false;p.status='ошибка: '+String(data.message||'').slice(0,35);
    }else if(data.type==='reset'){p.busy=false;p.awaitingReset=false;p.status='ищу детали'}
   };
-  worker.onerror=e=>{if(p.worker!==worker)return;p.status='недоступен';worker.terminate();p.worker=null;p.enabled=false;p.busy=false;console.error('Vision worker:',e.message)};
+  worker.onerror=e=>{if(p.worker!==worker)return;p.status='недоступен';p.visible=false;worker.terminate();p.worker=null;p.enabled=false;p.busy=false;console.error('Vision worker:',e.message)};
  }catch(e){p.enabled=false;p.status='не поддерживается';console.warn('Vision AR:',e)}
 }
 function stopVision(){
  const p=s.vision;p.worker?.terminate();p.worker=null;p.enabled=false;p.ready=false;
- p.busy=false;p.quality=0;p.points=0;
+ p.busy=false;p.visible=true;p.quality=0;p.points=0;
 }
 function runVision(now){
- const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||s.pinching||!video.videoWidth||video.readyState<2)return;
- const interval=s.fps&&s.fps<21?360:s.fps&&s.fps<27?270:185;
+ const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||!video.videoWidth||video.readyState<2)return;
+ const interval=s.fps&&s.fps<19?195:s.fps&&s.fps<25?140:100;
  if(now-p.lastCapture<interval||video.currentTime===p.lastVideoTime)return;
  p.busy=true;p.lastCapture=now;p.lastVideoTime=video.currentTime;
  const sid=s.sessionId,worker=p.worker;
@@ -394,7 +407,7 @@ function projectVision(){
  p.shiftY+=Math.abs(dy)<.2?dy:dy*.47;
  for(const w of windows){
   if(w.homeX==null){w.homeX=w.x-p.shiftX;w.homeY=w.y-p.shiftY}
-  w.hiddenSpatial=false;
+  w.hiddenSpatial=!p.visible;
   w.x=w.homeX+p.shiftX;w.y=w.homeY+p.shiftY;
  }
 }
@@ -477,7 +490,7 @@ function drawUIAtlas(){
   if(s.visionMode){
    activeDrawWin=null;
    actionRect(730,595,250,72,'⟳ ПРИВЯЗАТЬ',recenterVision,'primary',25);
-   text('AR-камера • '+s.vision.status+' • '+s.vision.points+' точек • '+s.vision.quality+'%',BASE_W/2,82,20,'#91fff3',700,'center');
+   text('AR-камера • '+s.vision.status+' • '+s.vision.points+' точек • '+s.vision.quality+'%',BASE_W/2,82,20,s.vision.visible?'#91fff3':'#ffcf89',700,'center');
   }else if(s.spatial.enabled){
    activeDrawWin=null;
    actionRect(760,595,220,72,'⟳ ЦЕНТР',recenterSpatial,'primary',25);
