@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PhoneXR — внешняя камера Redmi 9</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{background:#07131e;color:#e9fbff;font:15px system-ui;margin:0;padding:16px}
+main{max-width:680px;margin:auto}h1{font-size:29px;margin:7px 0}h2{font-size:17px}
+p{color:#bbd5df;line-height:1.5}.card{background:#102734;border:1px solid #2d515e;border-radius:16px;padding:15px;margin:12px 0}
+label{display:block;margin:8px 0;color:#b9d3de}input{width:100%;background:#08202a;border:1px solid #3e6673;border-radius:12px;padding:14px;color:white;font:22px monospace;letter-spacing:3px;text-transform:uppercase}
+button{display:inline-block;border:0;border-radius:12px;padding:14px 16px;font-weight:750;font-size:15px;background:#72eddf;color:#062e34;margin:8px 5px 8px 0}
+button:disabled{opacity:.5}a{color:#84eee7}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;background:#091e29;border-radius:9px;padding:10px}
+#preview{width:100%;max-width:640px;background:#000;border-radius:12px;aspect-ratio:4/3}
+small{color:#aec6d1}.status{color:#a8ffde;font-weight:700}
+</style></head><body><main>
+<h1>📡 PhoneXR · Redmi 9</h1>
+<p>Эта страница превращает Redmi 9 в неподвижную камеру трекинга. Она передаёт в PhoneXR <strong>только координаты метки</strong>, а не видеопоток.</p>
+<section class="card">
+<h2>1. Соедини телефоны</h2>
+<p>На Redmi 13 в настройках PhoneXR выбери «Внешняя камера Redmi 9», нажми «Создать код» и введи его здесь.</p>
+<label for="pairCode">Код пары из PhoneXR</label>
+<input id="pairCode" inputmode="text" autocapitalize="characters" maxlength="12" placeholder="8 СИМВОЛОВ" autocomplete="off" spellcheck="false">
+<button id="connectBtn">Подключить к PhoneXR</button>
+<div id="connection" class="status">Не подключено</div>
+</section>
+<section class="card">
+<h2>2. Включи заднюю камеру</h2>
+<p>Закрепи Redmi 9 устойчиво, чтобы метка на внешней стороне VR-очков находилась в кадре. Начни тест на столе, без надетых очков.</p>
+<button id="startCamera">📷 Запустить камеру</button><button id="stopCamera">Остановить</button>
+<canvas id="preview" width="320" height="240"></canvas>
+<pre id="diagnostics">Ожидание камеры.</pre>
+</section>
+<section class="card"><h2>3. Метка ArUco №347</h2>
+<p><a href="./marker.html">Открыть/распечатать метку</a>. Чёрный квадрат размером <b>100 мм</b>. Закрепи там, где Redmi 9 будет её видеть, не перекрывая основную камеру очков.</p>
+<p>Метка должна быть хорошо освещена. Когда она исчезает из кадра, положение очков перестаёт обновляться. Один Redmi 9 не видит всю комнату и не обеспечивает безопасную навигацию.</p></section>
+<small>Связь WebRTC PeerJS требует интернет для первоначального соединения. После установки соединения координаты передаются напрямую между телефонами, если это позволяет сеть. Никакой доступ к комнате извне не предоставляется.</small>
+</main>
+<video id="camera" autoplay muted playsinline style="position:absolute;width:1px;height:1px;opacity:.01;left:-10px"></video>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const video=$('camera'),canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+let peer=null,conn=null,stream=null,detector=null,posit=null,active=false,last=0,lastLost=0,lastSeen=0,frameCount=0,markerReady=false,wakeLock=null;
+const MARKER_ID=347,MARKER_SIZE_MM=100;
+const setConnection=text=>$('connection').textContent=text;
+const diag=text=>$('diagnostics').textContent=text;
+function loadScript(url){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=url;s.onload=resolve;s.onerror=()=>reject(Error('Скрипт не загрузился: '+url));document.head.appendChild(s)})}
+async function loadArUco(){
+ if(markerReady)return;
+ diag('Загружаю распознавание квадратной метки...');
+ const root='https://cdn.jsdelivr.net/gh/jcmellado/js-aruco@master/src/';
+ for(const file of ['cv.js','aruco.js','svd.js','posit1.js'])await loadScript(root+file);
+ if(typeof AR==='undefined'||typeof POS==='undefined')throw Error('Библиотека распознавания не запустилась');
+ detector=new AR.Detector();posit=new POS.Posit(MARKER_SIZE_MM,320);markerReady=true;
+}
+function closePeer(){try{conn?.close()}catch{}try{peer?.destroy()}catch{}conn=peer=null}
+$('connectBtn').onclick=()=>{
+ const code=$('pairCode').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+ if(code.length<6){setConnection('Введи код из PhoneXR (не менее 6 символов).');return}
+ if(typeof Peer!=='function'){setConnection('Не загрузился PeerJS. Проверь интернет.');return}
+ closePeer();setConnection('Подключаюсь...');
+ peer=new Peer(undefined,{debug:1});
+ peer.on('open',()=>{if(!peer)return;
+  setConnection('Ищу PhoneXR с кодом '+code+'...');
+  conn=peer.connect('phonexr-'+code,{serialization:'json',reliable:false});
+  conn.on('open',()=>{setConnection('✅ Соединено с PhoneXR');conn.send({type:'hello',role:'redmi9',marker:MARKER_ID})});
+  conn.on('close',()=>setConnection('Соединение разорвано. Подключи снова.'));
+  conn.on('error',e=>setConnection('Ошибка связи: '+(e?.message||e)));
+ });
+ peer.on('error',e=>setConnection('Ошибка PeerJS: '+(e?.message||e)));
+};
+function send(data){if(conn?.open){try{conn.send(data)}catch(e){console.warn('Send',e)}}}
+function stopCamera(){
+ active=false;
+ if(stream){for(const t of stream.getTracks())t.stop();stream=null}
+ video.pause();video.srcObject=null;
+ wakeLock?.release?.().catch(()=>{});wakeLock=null;
+ diag('Камера остановлена.');
+}
+$('stopCamera').onclick=stopCamera;
+$('startCamera').onclick=async()=>{
+ stopCamera();
+ $('startCamera').disabled=true;
+ try{
+  await loadArUco();
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480},frameRate:{ideal:20,max:24}}});
+  video.srcObject=stream;await video.play();
+  try{wakeLock=await navigator.wakeLock?.request('screen')}catch{}
+  active=true;last=0;frameCount=0;diag('Ищу метку №'+MARKER_ID+'...');
+  requestAnimationFrame(loop);
+ }catch(e){diag('❌ '+(e?.name||'Error')+': '+(e?.message||e)+'\nИспользуй HTTPS в Chrome и разреши камеру.');console.error(e);stopCamera()}
+ finally{$('startCamera').disabled=false}
+};
+function loop(now){
+ if(!active)return;
+ requestAnimationFrame(loop);
+ if(now-last<85||video.readyState<2)return;
+ last=now;
+ const started=performance.now();
+ try{
+  ctx.drawImage(video,0,0,320,240);
+  const found=detector.detect(ctx.getImageData(0,0,320,240));
+  const marker=found.find(m=>m.id===MARKER_ID);
+  if(marker){
+   let corners=marker.corners.map(p=>({x:p.x,y:p.y}));
+   ctx.lineWidth=4;ctx.strokeStyle='#4cff92';ctx.beginPath();
+   corners.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.stroke();
+   const pts=corners.map(p=>({x:p.x-160,y:120-p.y}));
+   const pose=posit.pose(pts);
+   const t=pose.bestTranslation,R=pose.bestRotation;
+   const valid=t?.length===3&&Array.isArray(R)&&R.length===3&&t.every(Number.isFinite)&&t[2]>0&&t[2]<18000;
+   const err=pose.bestError;
+   if(valid&&Number.isFinite(err)&&err<65){
+    const msg={type:'pose',id:MARKER_ID,seq:++frameCount,ts:Date.now(),t:t.map(v=>Math.round(v*10)/10),
+      R:R.map(row=>row.map(v=>Math.round(v*10000)/10000)),err:Math.round(err*10)/10};
+    send(msg);lastSeen=now;
+    diag('✅ МЕТКА ВИДНА | ID '+MARKER_ID+'\n'+
+      'Положение в мм (оценка): x '+Math.round(t[0])+' • y '+Math.round(t[1])+' • z '+Math.round(t[2])+
+      '\nПогрешность модели: '+msg.err+' px • Обработка '+Math.round(performance.now()-started)+' ms'+
+      '\nПередано пакетов: '+frameCount+' • WebRTC: '+(conn?.open?'связь есть':'нет связи'));
+   }else diag('Метка видна, но оценка позы ненадёжна. Поверни метку к камере.');
+  }else{
+   diag('⚠️ Метка №'+MARKER_ID+' не обнаружена.\nПокажи квадрат в камеру, без бликов.\nWebRTC: '+(conn?.open?'связь есть':'нет связи'));
+  }
+  if(!marker&&now-lastLost>330){lastLost=now;send({type:'lost',ts:Date.now(),id:MARKER_ID})}
+ }catch(e){diag('Ошибка обработки: '+(e?.message||e));console.error(e);active=false}
+}
+window.addEventListener('beforeunload',()=>{stopCamera();closePeer()});
+document.addEventListener('visibilitychange',async()=>{if(!document.hidden&&active&&!wakeLock){try{wakeLock=await navigator.wakeLock?.request('screen')}catch{}}});
+</script></body></html>
