@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.4 Performance</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.5 Smooth Hand</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -84,7 +84,7 @@
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">В v0.4 камера выводится отдельно от Canvas. Наверху показываются два FPS: «кам» и «UI». Если всё тормозит, включи тест без распознавания руки.</div>
+      <div class="detail">В v0.5 кадры для распознавания руки уменьшены, а частота анализа регулируется по реальному FPS. Наверху показываются «кам», «UI», режим руки, время ИИ и время подготовки кадра. Экономный режим дополнительно снижает нагрузку.</div>
       <div class="detail">Если окна двоятся в линзах — меняй сведение. Одна камера не создаёт настоящую глубину; при плохом самочувствии немедленно снимай очки.</div>
     </section>
     <section class="card">
@@ -150,7 +150,7 @@ $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestR
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0};
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
@@ -207,7 +207,7 @@ function drawUIAtlas(){
   if(s.demo)drawCamera(0);
   regions=[];for(const win of windows)drawWindow(win);
   drawHand();
-  text('XR  •  кам '+(s.cameraFps||'…')+'  •  UI '+(s.fps||'…')+' FPS  •  рука '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),20,34,18,'#e4fbff',650);
+  text('XR • кам '+(s.cameraFps||'…')+' • UI '+(s.fps||'…')+' FPS • рука '+s.trackerStatus+(s.inferenceMs?' AI '+s.inferenceMs+'ms':'')+(s.captureMs?' захват '+s.captureMs+'ms':''),20,34,17,'#e4fbff',650);
   if(s.hand&&performance.now()-s.handSeen<650)text(s.pinching?'ЩИПОК':'РУКА В КАДРЕ',BASE_W/2,665,19,'#d3fff5',650,'center');
   else if(!s.disableTracking)text('Покажи ладонь перед камерой',BASE_W/2,665,19,'#c1dbe5',600,'center');
  }finally{ctx=screenCtx}
@@ -248,11 +248,16 @@ function setHand(landmarks){if(!landmarks||!landmarks.length){if(s.pinching)endP
 // Hand inference is synchronous in MediaPipe. Use a dedicated worker so rendering stays responsive.
 const trackCanvas=document.createElement('canvas');
 trackCanvas.width=480;trackCanvas.height=270;
-const trackCtx=trackCanvas.getContext('2d',{alpha:false});
+const trackCtx=trackCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
+function fastTrackSize(){
+ const vw=video.videoWidth||640,vh=video.videoHeight||480;
+ const w=s.lowPower?192:256;
+ return {w,h:Math.max(1,Math.round(w*vh/vw))};
+}
 function closeTracker(){
  if(s.worker){s.worker.terminate();s.worker=null}
  if(s.tracker){try{s.tracker.close()}catch{}s.tracker=null}
- s.workerReady=false;s.trackingBusy=false;s.inferenceMs=0;
+ s.workerReady=false;s.trackingBusy=false;s.inferenceMs=0;s.captureMs=0;
 }
 async function loadLegacyTracking(sessionId){
  if(sessionId!==s.sessionId||!s.running)return;
@@ -265,12 +270,12 @@ async function loadLegacyTracking(sessionId){
   try{task=await HandLandmarker.createFromOptions(vision,{...options,baseOptions:{...options.baseOptions,delegate:'GPU'}})}
   catch(e){task=await HandLandmarker.createFromOptions(vision,{...options,baseOptions:{...options.baseOptions,delegate:'CPU'}})}
   if(sessionId!==s.sessionId||!s.running){task.close();return}
-  s.tracker=task;s.trackerStatus='резерв';os.textContent='Запасной режим: жесты работают, FPS может быть ниже';
+  s.tracker=task;s.trackerStatus='резерв';os.textContent='Запасной режим ИИ (на главном потоке): '+(s.workerFailure||'Worker не поддерживается');
  }catch(err){s.trackerStatus='ошибка';os.textContent='Не удалось загрузить распознавание руки';console.error('Legacy tracking failed',err)}
 }
 function failWorker(sessionId,reason){
  if(sessionId!==s.sessionId||!s.running||s.workerFallback)return;
- s.workerFallback=true;console.warn('Hand worker failed, fallback:',reason);
+ s.workerFallback=true;s.workerFailure=String(reason||'unknown').slice(0,90);console.warn('Hand worker failed, fallback:',reason);
  if(s.worker){s.worker.terminate();s.worker=null}
  s.workerReady=false;s.trackingBusy=false;
  loadLegacyTracking(sessionId);
@@ -278,7 +283,7 @@ function failWorker(sessionId,reason){
 function loadHandTracking(sessionId){
  if(s.demo)return;
  s.trackerStatus='загрузка';os.textContent='Камера работает • готовлю фоновое распознавание…';
- s.workerFallback=false;s.workerReady=false;s.trackingBusy=false;s.lastDetected=0;s.lastVideoTime=-1;
+ s.workerFallback=false;s.workerFailure='';s.workerReady=false;s.trackingBusy=false;s.lastDetected=0;s.lastVideoTime=-1;
  if(typeof Worker==='undefined'||typeof createImageBitmap==='undefined'){
   failWorker(sessionId,'Web Worker or ImageBitmap unavailable');return;
  }
@@ -304,36 +309,62 @@ function loadHandTracking(sessionId){
   worker.postMessage({type:'init'});
  }catch(e){failWorker(sessionId,e.message||e)}
 }
+function captureTrackingImage(w,h){
+ if(trackCanvas.width!==w||trackCanvas.height!==h){trackCanvas.width=w;trackCanvas.height=h}
+ trackCtx.drawImage(video,0,0,w,h);
+}
 function runTracking(now){
  if(!video.videoWidth||video.readyState<2)return;
  if(s.workerReady&&s.worker){
-  if(s.trackingBusy||now-s.lastDetected<(s.lowPower?260:150))return;
-  if(video.currentTime===s.lastVideoTime)return;
+  if(s.trackingBusy)return;
+  // Reduce sampling when animation starts dropping frames, rather than slowing every VR frame.
+  const interval=s.lowPower?360:(s.fps&&s.fps<24?310:s.fps&&s.fps<28?235:180);
+  s.trackingInterval=interval;
+  if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
   s.lastDetected=now;s.lastVideoTime=video.currentTime;s.trackingBusy=true;
   const sid=s.sessionId,worker=s.worker;
+  const {w,h}=fastTrackSize();
+  const started=performance.now();
+  // Fast path avoids synchronous drawImage-to-Canvas on the UI thread.
+  function fallbackBitmap(){
+   try{
+    captureTrackingImage(w,h);
+    return createImageBitmap(trackCanvas);
+   }catch(e){return Promise.reject(e)}
+  }
+  let imagePromise;
   try{
-   const w=s.lowPower?256:320,h=s.lowPower?144:180;
-   if(trackCanvas.width!==w){trackCanvas.width=w;trackCanvas.height=h}
-   trackCtx.drawImage(video,0,0,w,h);
-   createImageBitmap(trackCanvas).then(bitmap=>{
-    if(sid!==s.sessionId||worker!==s.worker||!s.running){bitmap.close();s.trackingBusy=false;return}
-    try{worker.postMessage({type:'detect',bitmap,timestampMs:now},[bitmap])}
-    catch(e){bitmap.close();failWorker(sid,e.message||e)}
-   }).catch(e=>failWorker(sid,e.message||e));
-  }catch(e){failWorker(sid,e.message||e)}
+   imagePromise=createImageBitmap(video,0,0,video.videoWidth,video.videoHeight,{
+    resizeWidth:w,resizeHeight:h,resizeQuality:'low'
+   }).catch(()=>fallbackBitmap());
+  }catch(e){imagePromise=fallbackBitmap()}
+  imagePromise.then(bitmap=>{
+   if(sid!==s.sessionId||worker!==s.worker||!s.running){
+    bitmap.close();s.trackingBusy=false;return;
+   }
+   s.captureMs=Math.round(performance.now()-started);
+   try{worker.postMessage({type:'detect',bitmap,timestampMs:now},[bitmap])}
+   catch(e){bitmap.close();failWorker(sid,e.message||e)}
+  }).catch(e=>failWorker(sid,e.message||e));
   return;
  }
  if(!s.tracker)return;
- if(now-s.lastDetected<(s.lowPower?480:290))return;
- if(video.currentTime===s.lastVideoTime)return;
+ // Slow fallback can block the main thread. Use small input and fewer detections.
+ const interval=s.lowPower?540:(s.fps&&s.fps<24?490:350);
+ s.trackingInterval=interval;
+ if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
  s.lastDetected=now;s.lastVideoTime=video.currentTime;
  try{
-  const started=performance.now();
-  const result=s.tracker.detectForVideo(video,now);
-  s.inferenceMs=Math.round(performance.now()-started);
+  const started=performance.now(),{w,h}=fastTrackSize();
+  captureTrackingImage(w,h);
+  s.captureMs=Math.round(performance.now()-started);
+  const t=performance.now();
+  const result=s.tracker.detectForVideo(trackCanvas,now);
+  s.inferenceMs=Math.round(performance.now()-t);
   setHand(result.landmarks?.[0]||null);
  }catch(e){
-  s.trackerStatus='ошибка';console.error(e);s.tracker?.close?.();s.tracker=null;
+  s.trackerStatus='ошибка';console.error(e);
+  s.tracker?.close?.();s.tracker=null;
   os.textContent='Ошибка распознавания руки • можно пользоваться касаниями';
  }
 }
@@ -377,7 +408,7 @@ async function enterMode(demo){
   }else{s.cameraStatus='ДЕМО';screen.classList.remove('camera-active')}
   s.demo=demo;s.trackerStatus=demo?'выкл':(s.disableTracking?'отключено':'загрузка');
   s.running=true;initialWindows();s.timerLast=performance.now();
-  s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;
+  s.lastDraw=0;s.fpsStarted=0;s.drawCount=0;s.fps=0;s.captureMs=0;s.inferenceMs=0;
   $('setup').classList.add('hidden');fit();
   try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){console.debug('Full screen unavailable:',e)}
   try{if(window.screen.orientation?.lock)await window.screen.orientation.lock('landscape')}catch(e){console.debug('Orientation lock unavailable:',e)}
