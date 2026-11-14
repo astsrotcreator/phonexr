@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.9 AR Tracking Rebuild</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.10 Camera AR Lite</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -81,12 +81,13 @@
       <div class="setting"><label for="eyeShift">Сведение картинки <b id="eyeText">0</b></label><input type="range" id="eyeShift" min="-100" max="100" step="5" value="0"></div>
       <div class="setting"><label for="mirror">Зеркальное изображение</label><input type="checkbox" id="mirror"></div>
       <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
-<div class="setting"><label for="spatialMode">AR-пространство (3DoF, только сидя)</label><input type="checkbox" id="spatialMode"></div>
+<div class="setting"><label for="visionMode">AR по камере — отслеживать детали на стене (эксперимент)</label><input type="checkbox" id="visionMode" checked></div>
+<div class="setting"><label for="spatialMode">AR по датчикам — слабый режим без гироскопа</label><input type="checkbox" id="spatialMode"></div>
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
 <div class="setting"><label for="trackSize">Качество распознавания руки <b id="trackSizeText">224px</b></label><input type="range" id="trackSize" min="160" max="320" step="32" value="224"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">v0.9: переписана 3D-математика AR — привязка окон по направлению и проекция через кватернионы, без рывков при 180°. Используй «ЦЕНТР», если датчик врёт. Это только 3DoF: положения в комнате и препятствий приложение НЕ видит.</div>
+      <div class="detail">v0.10: AR по камере пытается удерживать окна на видимых деталях изображения. Наведи камеру на текстурированную стену или предметы, нажми «ПРИВЯЗАТЬ» и медленно поверни телефон. При потере ориентиров окна останутся на месте. Это только 2D, не 6DoF/SLAM.</div>
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
@@ -151,15 +152,27 @@ $('testCameraBtn').addEventListener('click',async()=>{
 $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
-const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','trackSize','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0};
+const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','trackSize','renderScale','noteText'];
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
-for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
-function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
-function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
-for(const key of SETTING_KEYS)$(key).addEventListener('input',syncSettings);
+for(const key of SETTING_KEYS){if(saved[key]!==undefined)$(key).value=String(saved[key]); if(['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode'].includes(key)&&saved[key]!==undefined)$(key).checked=!!saved[key]}
+function saveSettings(){const r={};for(const key of SETTING_KEYS)r[key]=['mirror','showSkeleton','lowPower','disableTracking','spatialMode','visionMode'].includes(key)?$(key).checked:$(key).value;try{localStorage.setItem('phonexr-settings',JSON.stringify(r))}catch{}}
+function syncSettings(){s.zoom=Number($('zoom').value);s.eyeShift=Number($('eyeShift').value);s.mirror=$('mirror').checked;s.showSkeleton=$('showSkeleton').checked;s.lowPower=$('lowPower').checked;s.disableTracking=$('disableTracking').checked;s.spatialMode=$('spatialMode').checked;s.visionMode=$('visionMode').checked;s.trackSize=Number($('trackSize').value);s.renderScale=Number($('renderScale').value);s.note=$('noteText').value; $('zoomText').textContent=s.zoom.toFixed(2)+'×';$('eyeText').textContent=String(s.eyeShift);$('renderScaleText').textContent=s.renderScale.toFixed(2)+'×';$('trackSizeText').textContent=s.trackSize+'px';updateCameraVisual();saveSettings()}
+for(const key of SETTING_KEYS){
+ if(key==='visionMode'||key==='spatialMode')continue;
+ $(key).addEventListener('input',syncSettings);
+}
+$('visionMode').addEventListener('input',()=>{
+ if($('visionMode').checked)$('spatialMode').checked=false;
+ syncSettings();
+});
+$('spatialMode').addEventListener('input',()=>{
+ if($('spatialMode').checked)$('visionMode').checked=false;
+ syncSettings();
+});
+if($('visionMode').checked&&$('spatialMode').checked)$('spatialMode').checked=false;
 syncSettings();
 $('renderScale').addEventListener('input',()=>fit());
 const appInfo={launcher:{title:'PHONE XR',icon:'◈'},clock:{title:'Часы',icon:'◷'},timer:{title:'Таймер',icon:'◴'},note:{title:'Заметка',icon:'▤'},counter:{title:'Счётчик',icon:'⊕'},help:{title:'Помощь',icon:'✌'},settings:{title:'Оптика',icon:'⚙'}};
