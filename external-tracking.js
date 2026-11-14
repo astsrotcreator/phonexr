@@ -37,7 +37,8 @@ function project(pose,world){
  */
 const PX_BROKERS=[
  {name:'EMQX',url:'wss://broker.emqx.io:8084/mqtt'},
- {name:'Mosquitto',url:'wss://test.mosquitto.org:8081'}
+ {name:'Mosquitto',url:'wss://test.mosquitto.org:8081'},
+ {name:'Eclipse443',url:'wss://mqtt.eclipseprojects.io:443/mqtt'}
 ];
 const encoder=new TextEncoder(),decoder=new TextDecoder();
 function hex(bytes){return [...bytes].map(n=>n.toString(16).padStart(2,'0')).join('')}
@@ -239,7 +240,7 @@ function createReceiver(onPose,onStatus){
   stop();
   const id=epoch;
   token=freshCode();
-  status('Код создан. Подключаю EMQX и Mosquitto...');
+  status('Код создан. Проверяю EMQX, Mosquitto и Eclipse443...');
   Promise.resolve().then(async()=>{
    const ch=await channel(token);
    if(id!==epoch)return;
