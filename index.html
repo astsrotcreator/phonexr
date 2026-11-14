@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.13 Markerless Tracking</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.14 MQTT Connection</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -100,8 +100,8 @@
       <h2>04 / Внешняя камера Redmi 9</h2>
       <div class="setting"><label for="externalMode">Использовать внешнюю камеру Redmi 9</label><input type="checkbox" id="externalMode"></div>
       <div class="setting"><label for="markerlessMode">Без метки — отслеживать голову и плечи</label><input type="checkbox" id="markerlessMode" checked></div>
-      <p class="detail">В режиме без метки Redmi 9 распознаёт фигуру человека и передаёт её приблизительное положение. Внешняя камера не знает точного поворота очков — это 2D-привязка, не 6DoF. Проверять только сидя и без надетых очков.</p>
-      <button id="pairExternalBtn" class="secondary" type="button">📡 Создать код для Redmi 9</button>
+      <p class="detail">Подключение переведено с PeerJS на MQTT через защищённый WebSocket. После нажатия «Создать код» подожди статуса «MQTT подключён» и введи новый 12-символьный код на Redmi 9. Передаются только зашифрованные измерения тела, не видео. Это 2D, не 6DoF.</p>
+      <button id="pairExternalBtn" class="secondary" type="button">📡 Создать новый код для Redmi 9</button>
       <div id="externalPairCode" style="font-size:27px;letter-spacing:.12em;font-family:monospace;font-weight:800;margin:13px 0;overflow-wrap:anywhere">—</div>
       <div id="externalPairStatus" class="detail" role="status">Внешняя камера не подключена</div>
       <p class="detail"><a href="./external-body.html" target="_blank" rel="noopener" style="color:#71ebdf">Redmi 9: камера без метки</a> · <a href="./external-camera.html" target="_blank" rel="noopener" style="color:#71ebdf">Старый режим с меткой</a></p>
@@ -480,7 +480,7 @@ function onExternalPacket(packet){
 async function pairExternal(){
  const btn=$('pairExternalBtn');
  if(!window.ExternalTracking){updateExternalStatus('Не загрузился модуль внешней камеры. Обнови страницу.');return}
- btn.disabled=true;updateExternalStatus('Подключаю PeerJS...');
+ btn.disabled=true;updateExternalStatus('Подключаю MQTT-сервер...');
  try{
   if(!s.external.receiver)s.external.receiver=window.ExternalTracking.createReceiver(onExternalPacket,updateExternalStatus);
   const token=await s.external.receiver.start();
