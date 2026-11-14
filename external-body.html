@@ -34,7 +34,7 @@ small{color:#afc4cc}
 const $=id=>document.getElementById(id);
 const v=$('camera'),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
 let peer=null,conn=null,stream=null,worker=null,ready=false,busy=false,active=false,lastFrame=0,frameCount=0;
-let body=null,missingFrames=0,lastSent=0,wake=null,runId=0;
+let body=null,missingFrames=0,lastSent=0,wake=null,runId=0,lastPaint=0;
 const status=t=>$('status').textContent=t, connection=t=>$('connection').textContent=t;
 function disconnect(){try{conn?.close()}catch{}try{peer?.destroy()}catch{}conn=null;peer=null}
 $('connect').onclick=()=>{
@@ -76,9 +76,11 @@ $('start').onclick=async()=>{
   if(!navigator.mediaDevices?.getUserMedia)throw Error('Нужен Chrome и HTTPS');
   worker=new Worker('./body-pose-worker.js',{type:'module'});
   worker.onmessage=({data})=>{
-   if(current!==runId||!active)return;
+   if(current!==runId)return;
+   // Model loading may finish before the camera stream has started.
    if(data.type==='ready'){ready=true;status('✅ Модель распознавания тела загружена. Покажись в кадре.');return}
    if(data.type==='error'){busy=false;status('❌ Ошибка MediaPipe: '+data.message);return}
+   if(!active)return;
    if(data.type==='result'){
     busy=false;body=data.body;frameCount++;
     if(body){
@@ -112,6 +114,8 @@ async function loop(now){
  if(!active)return;
  requestAnimationFrame(loop);
  if(v.readyState<2)return;
+ if(now-lastPaint<60)return;
+ lastPaint=now;
  ctx.drawImage(v,0,0,320,240);
  if(body?.points?.length){
   ctx.fillStyle='#76f7dd';ctx.strokeStyle='#76f7dd';ctx.lineWidth=2;
