@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PhoneXR — Redmi 9 без метки</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#07131e;color:#e8faff;font:15px system-ui}
+main{max-width:660px;margin:auto}h1{font-size:27px;margin:8px 0}.card{padding:15px;border:1px solid #2d515e;background:#102734;border-radius:16px;margin:12px 0}
+p{line-height:1.5;color:#c4dae3}input{font-size:23px;font-family:monospace;letter-spacing:3px;border-radius:12px;background:#092330;color:white;border:1px solid #527481;padding:13px;width:100%;text-transform:uppercase}
+button{border:0;border-radius:12px;background:#79ebdf;color:#082e35;padding:14px 17px;margin:7px 5px 7px 0;font-size:15px;font-weight:800}
+button:disabled{opacity:.5}#view{width:100%;aspect-ratio:4/3;background:#000;border-radius:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#b9e7df;font-size:13px;line-height:1.5}
+small{color:#afc4cc}
+</style></head><body><main>
+<h1>📡 PhoneXR — камера Redmi 9</h1>
+<p><b>Без метки, без креплений, без ПК.</b> Redmi 9 будет видеть тебя со стороны и примерно отслеживать положение головы и плеч. Направление взгляда такая система не знает.</p>
+<section class="card"><h2>1. Соединить телефоны</h2>
+<p>На Redmi 13 в PhoneXR включи <b>«Внешняя камера без метки»</b>, затем нажми <b>«Создать код»</b>. Введи код сюда.</p>
+<input id="code" maxlength="12" placeholder="КОД С REDMI 13" autocomplete="off" spellcheck="false">
+<button id="connect">Соединить с PhoneXR</button>
+<p id="connection">Ожидание подключения.</p></section>
+<section class="card"><h2>2. Камера и распознавание</h2>
+<p>Установи Redmi 9 неподвижно в углу. Ты должен попадать в кадр хотя бы по пояс, а лучше целиком.</p>
+<button id="start">📷 Включить трекинг</button><button id="stop">Остановить</button>
+<canvas id="view" width="320" height="240"></canvas>
+<pre id="status">Ожидаю запуска камеры.</pre>
+</section>
+<section class="card"><h2>Как проверить</h2>
+<p>Не надевая VR-очки, встань или сядь перед Redmi 9, затем медленно смещайся влево и вправо. Убедись, что на изображении видны точки головы и плеч. На Redmi 13 нажми «ЦЕНТР» и посмотри, как меняются окна.</p>
+<p><b>Ограничение:</b> внешняя камера определяет положение фигуры в кадре, а не координаты очков с точностью AR/VR. Если ты повернёшься спиной или выйдешь из кадра, трекинг может пропасть.</p></section>
+<small>Видео обрабатывается локально на Redmi 9. На Redmi 13 через WebRTC отправляются только измерения позы, а не видеокадры. Первичное подключение требует интернета. Это эксперимент — не используй приложение для передвижения в очках.</small>
+</main>
+<video id="camera" autoplay muted playsinline style="position:absolute;width:1px;height:1px;left:-30px;opacity:.01;pointer-events:none"></video>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const v=$('camera'),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
+let peer=null,conn=null,stream=null,worker=null,ready=false,busy=false,active=false,lastFrame=0,frameCount=0;
+let body=null,missingFrames=0,lastSent=0,wake=null,runId=0;
+const status=t=>$('status').textContent=t, connection=t=>$('connection').textContent=t;
+function disconnect(){try{conn?.close()}catch{}try{peer?.destroy()}catch{}conn=null;peer=null}
+$('connect').onclick=()=>{
+ const code=$('code').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+ if(code.length<6){connection('Введи код из PhoneXR.');return}
+ if(typeof Peer!=='function'){connection('Не загрузился PeerJS. Проверь интернет.');return}
+ disconnect();connection('Связываюсь...');
+ peer=new Peer(undefined,{debug:1});
+ const local=peer;
+ local.on('open',()=>{
+  if(peer!==local)return;
+  conn=peer.connect('phonexr-'+code,{serialization:'json',reliable:false});
+  const current=conn;
+  connection('Ищу Redmi 13...');
+  current.on('open',()=>{
+   if(conn!==current)return;
+   connection('✅ Соединено с Redmi 13!');
+   current.send({type:'hello',role:'redmi9-pose',tracking:'markerless'});
+  });
+  current.on('close',()=>{if(conn===current){conn=null;connection('Связь потеряна. Подключи заново.')}});
+  current.on('error',e=>connection('Ошибка соединения: '+(e?.message||e)));
+ });
+ local.on('error',e=>connection('Ошибка PeerJS: '+(e?.message||e)));
+};
+function send(data){if(conn?.open){try{conn.send(data)}catch(e){console.warn('WebRTC send failed',e)}}}
+function stopCamera(){
+ ++runId;active=false;ready=false;busy=false;
+ try{worker?.terminate()}catch{}worker=null;
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ v.pause();v.srcObject=null;body=null;
+ wake?.release?.().catch(()=>{});wake=null;
+ status('Камера остановлена.');
+}
+$('stop').onclick=stopCamera;
+$('start').onclick=async()=>{
+ stopCamera();
+ const current=runId;$('start').disabled=true;
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('Нужен Chrome и HTTPS');
+  worker=new Worker('./body-pose-worker.js',{type:'module'});
+  worker.onmessage=({data})=>{
+   if(current!==runId||!active)return;
+   if(data.type==='ready'){ready=true;status('✅ Модель распознавания тела загружена. Покажись в кадре.');return}
+   if(data.type==='error'){busy=false;status('❌ Ошибка MediaPipe: '+data.message);return}
+   if(data.type==='result'){
+    busy=false;body=data.body;frameCount++;
+    if(body){
+     missingFrames=0;
+     const now=performance.now();
+     send({type:'body',head:{x:body.x,y:body.y},shoulders:body.shoulders,
+       width:body.width,size:body.size,quality:body.quality,ts:Date.now()});
+     lastSent=now;
+     status('✅ ТЕЛО ВИДНО • '+body.quality+'\nГолова x '+body.x.toFixed(3)+' • y '+body.y.toFixed(3)+
+       '\nПлечи: '+Math.round(body.width*100)+'% ширины кадра'+
+       '\nИИ: '+data.processingMs+' мс • измерений '+frameCount+
+       '\nWebRTC: '+(conn?.open?'подключён':'не подключён'));
+    }else{
+     if(++missingFrames>=2){send({type:'lost',reason:'body-not-found'});missingFrames=0}
+     status('⚠️ Человек не обнаружен. Отойди от камеры, чтобы плечи и корпус были видны.');
+    }
+   }
+  };
+  worker.onerror=e=>{ready=false;busy=false;status('❌ Ошибка обработчика: '+e.message)};
+  worker.postMessage({type:'init'});
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480},frameRate:{ideal:20,max:24}}});
+  v.srcObject=stream;await v.play();
+  try{wake=await navigator.wakeLock?.request('screen')}catch{}
+  active=true;lastFrame=0;frameCount=0;
+  status('Камера работает. Загружаю модель...');
+  requestAnimationFrame(loop);
+ }catch(e){stopCamera();status('❌ '+(e.name||'Error')+': '+(e.message||e)+'\nПроверь HTTPS и разрешение камеры.');console.error(e)}
+ finally{$('start').disabled=false}
+};
+async function loop(now){
+ if(!active)return;
+ requestAnimationFrame(loop);
+ if(v.readyState<2)return;
+ ctx.drawImage(v,0,0,320,240);
+ if(body?.points?.length){
+  ctx.fillStyle='#76f7dd';ctx.strokeStyle='#76f7dd';ctx.lineWidth=2;
+  const get=i=>body.points.find(p=>p.i===i);
+  for(const [a,b] of [[11,12],[11,23],[12,24]]){
+   const p=get(a),q=get(b);if(!p||!q)continue;
+   ctx.beginPath();ctx.moveTo(p.x*320,p.y*240);ctx.lineTo(q.x*320,q.y*240);ctx.stroke();
+  }
+  for(const p of body.points){ctx.beginPath();ctx.arc(p.x*320,p.y*240,3,0,Math.PI*2);ctx.fill()}
+ }
+ if(!ready||busy||now-lastFrame<135)return;
+ lastFrame=now;busy=true;
+ const sid=runId,current=worker;
+ try{
+  const bitmap=await createImageBitmap(v,0,0,v.videoWidth,v.videoHeight,
+   {resizeWidth:256,resizeHeight:192,resizeQuality:'low'});
+  if(sid!==runId||worker!==current||!active){bitmap.close();busy=false;return}
+  current.postMessage({type:'detect',bitmap,timestamp:now},[bitmap]);
+ }catch(e){busy=false;status('Ошибка кадра: '+(e?.message||e))}
+}
+window.addEventListener('beforeunload',()=>{stopCamera();disconnect()});
+document.addEventListener('visibilitychange',async()=>{if(!document.hidden&&active&&!wake){try{wake=await navigator.wakeLock?.request('screen')}catch{}}});
+</script></body></html>
