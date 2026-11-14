@@ -13,7 +13,7 @@ small{color:#afc4cc}
 <h1>📡 PhoneXR — камера Redmi 9</h1>
 <p><b>Без метки, без креплений, без ПК.</b> Redmi 9 будет видеть тебя со стороны и примерно отслеживать положение головы и плеч. Направление взгляда такая система не знает.</p>
 <section class="card"><h2>1. Соединить телефоны</h2>
-<p>На Redmi 13 в PhoneXR включи <b>«Использовать внешнюю камеру Redmi 9»</b> и <b>«Без метки»</b>, затем нажми <b>«Создать код»</b>. Введи код сюда.</p>
+<p>На Redmi 13 в PhoneXR включи <b>«Использовать внешнюю камеру Redmi 9»</b> и <b>«Без метки»</b>, затем нажми <b>«Создать код»</b>. Введи сюда новый код из 12 символов. Старый код от PeerJS не подойдёт.</p>
 <input id="code" maxlength="12" placeholder="КОД С REDMI 13" autocomplete="off" spellcheck="false">
 <button id="connect">Соединить с PhoneXR</button>
 <p id="connection">Ожидание подключения.</p></section>
@@ -29,7 +29,7 @@ small{color:#afc4cc}
 <small>Видео обрабатывается локально на Redmi 9. На Redmi 13 через защищённый MQTT (WSS, шифрование координат AES-GCM) передаются только измерения позы, а не видеокадры. Сервер MQTT публичный и экспериментальный; требуется интернет. Это эксперимент — не используй приложение для передвижения в очках.</small>
 </main>
 <video id="camera" autoplay muted playsinline style="position:absolute;width:1px;height:1px;left:-30px;opacity:.01;pointer-events:none"></video>
-<script src="./external-tracking.js"></script>
+<script src="./external-tracking.js?v=14"></script>
 <script>
 const $=id=>document.getElementById(id);
 const v=$('camera'),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
