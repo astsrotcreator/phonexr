@@ -50,7 +50,7 @@
 <body>
 <main class="setup" id="setup">
   <div class="container">
-    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.7 AR Space</span></div>
+    <div class="brand"><div class="brandlogo">◈</div>PHONE XR <span style="color:#8299a9;font-weight:500;letter-spacing:0">/ v0.8 AR Stabilization</span></div>
     <h1>Твой телефон.<br><span>Твоя реальность.</span></h1>
     <p class="lead">Бесплатный экспериментальный VR-пасстру на камере телефона: два экрана для линз, окна в воздухе и управление рукой через жест «щипок».</p>
     <div class="metrics"><span class="chip">◉ Камера</span><span class="chip">✌ Жесты</span><span class="chip">▣ Плавающие окна</span><span class="chip">₽ 0</span></div>
@@ -81,11 +81,11 @@
       <div class="setting"><label for="eyeShift">Сведение картинки <b id="eyeText">0</b></label><input type="range" id="eyeShift" min="-100" max="100" step="5" value="0"></div>
       <div class="setting"><label for="mirror">Зеркальное изображение</label><input type="checkbox" id="mirror"></div>
       <div class="setting"><label for="showSkeleton">Показывать точки руки</label><input type="checkbox" id="showSkeleton" checked></div>
-<div class="setting"><label for="spatialMode">AR-пространство: фиксировать окна по направлению</label><input type="checkbox" id="spatialMode"></div>
+<div class="setting"><label for="spatialMode">AR-пространство (3DoF, только сидя)</label><input type="checkbox" id="spatialMode"></div>
       <div class="setting"><label for="lowPower">Экономный режим распознавания рук</label><input type="checkbox" id="lowPower"></div>
       <div class="setting"><label for="disableTracking">Тест скорости без распознавания руки</label><input type="checkbox" id="disableTracking"></div>
       <div class="setting"><label for="renderScale">Чёткость изображения <b id="renderScaleText">1.00×</b></label><input type="range" id="renderScale" min="0.7" max="1.5" step="0.1" value="1.0"></div>
-      <div class="detail">AR Space v0.7 использует гироскоп для фиксации окон по направлению. Повороты головы отслеживаются; перемещение в пространстве — нет. Для возврата окон будет кнопка «ЦЕНТР».</div>
+      <div class="detail">v0.8: исправлено перескакивание окон при больших поворотах, добавлена фильтрация аномалий датчика. Для проверки поворачивай телефон медленно сидя, нажми «ЦЕНТР» для калибровки. Распознавание руки работает на ограниченной частоте, плавность курсора не означает плавность нейросети.</div>
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
@@ -151,7 +151,7 @@ $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestR
 refreshCameraInfo();
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','spatialMode','renderScale','noteText'];
-const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,yaw:0,pitch:0,lastEvent:0}};
+const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,yaw:0,pitch:0,lastEvent:0,rawYaw:0,rawPitch:0,rejected:0,samples:0}};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function getSaved(){try{return JSON.parse(localStorage.getItem('phonexr-settings')||'{}')}catch{return {}}}
 const saved=getSaved();
@@ -175,7 +175,8 @@ initialWindows();
 const deg=Math.PI/180, wrapAngle=a=>((a+180)%360+360)%360-180, viewYaw=62,viewPitch=45;
 function qmul(a,b){return {x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z}}
 function onSpatialOrientation(e){
- const p=s.spatial;if(!p.enabled||e.alpha==null||e.beta==null||e.gamma==null)return;
+ const p=s.spatial;
+ if(!p.enabled||e.alpha==null||e.beta==null||e.gamma==null)return;
  const x=e.beta*deg/2,y=e.alpha*deg/2,z=-e.gamma*deg/2;
  const c1=Math.cos(x),c2=Math.cos(y),c3=Math.cos(z),t1=Math.sin(x),t2=Math.sin(y),t3=Math.sin(z);
  let q={x:t1*c2*c3+c1*t2*t3,y:c1*t2*c3-t1*c2*t3,z:c1*c2*t3-t1*t2*c3,w:c1*c2*c3+t1*t2*t3};
@@ -184,11 +185,24 @@ function onSpatialOrientation(e){
  q=qmul(q,{x:0,y:0,z:-Math.sin(half),w:Math.cos(half)});
  const tx=-2*q.y,ty=2*q.x,tz=0;
  const fx=q.w*tx+q.y*tz-q.z*ty,fy=q.w*ty+q.z*tx-q.x*tz,fz=-1+q.x*ty-q.y*tx;
- p.yaw=Math.atan2(fx,-fz)/deg;p.pitch=Math.asin(clamp(fy,-1,1))/deg;
- p.lastEvent=performance.now();p.ready=true;
+ const rawYaw=Math.atan2(fx,-fz)/deg,rawPitch=Math.asin(clamp(fy,-1,1))/deg;
+ const now=performance.now();
+ if(!p.ready){
+  p.yaw=rawYaw;p.pitch=rawPitch;p.rawYaw=rawYaw;p.rawPitch=rawPitch;
+  p.ready=true;p.lastEvent=now;p.samples=1;return;
+ }
+ const dt=clamp(now-p.lastEvent,1,250);
+ const dyaw=wrapAngle(rawYaw-p.rawYaw),dpitch=rawPitch-p.rawPitch;
+ // Reject sudden sensor/compass discontinuities. Keep the previous trusted pose.
+ if(Math.abs(dyaw)>Math.max(9,dt*.33)||Math.abs(dpitch)>Math.max(9,dt*.33)){
+  p.rejected++;return;
+ }
+ p.rawYaw=rawYaw;p.rawPitch=rawPitch;p.lastEvent=now;p.samples++;
+ // Continuous unwrapped heading avoids teleporting windows across +/-180 degrees.
+ p.yaw+=dyaw;p.pitch=clamp(p.pitch+dpitch,-89,89);
 }
 async function beginSpatial(){
- const p=s.spatial;p.enabled=!!s.spatialMode;p.ready=false;p.anchored=false;p.lastEvent=0;
+ const p=s.spatial;p.enabled=!!s.spatialMode;p.ready=false;p.anchored=false;p.lastEvent=0;p.rejected=0;p.samples=0;
  if(!p.enabled)return;
  try{
   if(typeof DeviceOrientationEvent==='undefined')throw Error('Orientation sensor unavailable');
@@ -216,7 +230,7 @@ function projectSpatial(){
  if(!p.anchored){recenterSpatial();return}
  for(const w of windows){
   if(w.anchorYaw==null)anchorWindow(w);
-  w.x=BASE_W/2+wrapAngle(w.anchorYaw-p.yaw)*BASE_W/viewYaw-w.w/2;
+  w.x=BASE_W/2+(w.anchorYaw-p.yaw)*BASE_W/viewYaw-w.w/2;
   w.y=BASE_H/2-(w.anchorPitch-p.pitch)*BASE_H/viewPitch-w.h/2;
  }
 }
@@ -248,7 +262,7 @@ function smoothHandVisual(now){
  const dt=clamp(now-(s.lastVisualUpdate||now),1,80);
  s.lastVisualUpdate=now;
  const jump=s.visualHand?Math.hypot(target.x-s.visualHand.x,target.y-s.visualHand.y):0;
- const alpha=clamp(1-Math.exp(-dt/(jump>120?14:jump>40?22:35)),.2,.94);
+ const alpha=clamp(1-Math.exp(-dt/(jump>90?9:jump>25?17:27)),.42,.98);
  if(!s.visualHand||!target.landmarks?.length){
   s.visualHand={x:target.x,y:target.y,landmarks:target.landmarks?.map(p=>({x:p.x,y:p.y,z:p.z}))||null};
   return;
@@ -291,7 +305,7 @@ function drawUIAtlas(){
   if(s.spatial.enabled){
    activeDrawWin=null;
    actionRect(760,595,220,72,'⟳ ЦЕНТР',recenterSpatial,'primary',25);
-   text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR 3DoF • гироскоп':'AR • датчик недоступен',BASE_W/2,82,20,'#91fff3',700,'center');
+   text(s.spatial.ready&&performance.now()-s.spatial.lastEvent<1800?'AR: поворот • отброшено '+s.spatial.rejected:'AR: нет данных датчика',BASE_W/2,82,20,'#91fff3',700,'center');
   }
   drawHand();
   text('XR • кам '+(s.cameraFps||'…')+' • UI '+(s.fps||'…')+' • ИИ/с '+(s.handDetectFPS||'…')+' • '+s.trackerStatus+(s.inferenceMs?' '+s.inferenceMs+'ms':''),20,34,17,'#e4fbff',650);
@@ -335,7 +349,7 @@ function setHand(landmarks){
  if(now-s.handSamplesStart>=1000){s.handDetectFPS=Math.round(s.handSamples*1000/(now-s.handSamplesStart));s.handSamplesStart=now;s.handSamples=0}
  if(!landmarks||!landmarks.length){if(s.pinching)endPinch();s.hand=null;s.pinching=false;s.pinchCandidate=0;s.releaseCandidate=0;return}
  const raw=pointToScreen(landmarks[8]);if(!raw||!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return;const d=(a,b)=>Math.hypot(landmarks[a].x-landmarks[b].x,landmarks[a].y-landmarks[b].y);const ratio=d(4,8)/Math.max(.02,d(5,17));const pinch=ratio<.48;const release=ratio>.68;
- if(!s.hand)s.hand={x:raw.x,y:raw.y};else{s.hand.x+=(raw.x-s.hand.x)*.7;s.hand.y+=(raw.y-s.hand.y)*.7} s.hand.landmarks=landmarks;s.handSeen=performance.now();
+ if(!s.hand)s.hand={x:raw.x,y:raw.y};else{s.hand.x=raw.x;s.hand.y=raw.y} s.hand.landmarks=landmarks;s.handSeen=performance.now();
  if(!s.pinching){s.pinchCandidate=pinch?s.pinchCandidate+1:0;if(s.pinchCandidate>=2){s.pinching=true;s.releaseCandidate=0;beginPinch()}}
  else{movePinch();s.releaseCandidate=release?s.releaseCandidate+1:0;if(s.releaseCandidate>=2){s.pinching=false;s.pinchCandidate=0;endPinch()}}
 }
@@ -412,7 +426,7 @@ function runTracking(now){
  if(s.workerReady&&s.worker){
   if(s.trackingBusy)return;
   // Reduce sampling when animation starts dropping frames, rather than slowing every VR frame.
-  const interval=s.lowPower?330:(s.fps&&s.fps<22?260:s.fps&&s.fps<27?170:115);
+  const interval=s.lowPower?300:(s.fps&&s.fps<21?200:s.fps&&s.fps<26?140:95);
   s.trackingInterval=interval;
   if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
   s.lastDetected=now;s.lastVideoTime=video.currentTime;s.trackingBusy=true;
@@ -444,7 +458,7 @@ function runTracking(now){
  }
  if(!s.tracker)return;
  // Slow fallback can block the main thread. Use small input and fewer detections.
- const interval=s.lowPower?520:(s.fps&&s.fps<22?370:270);
+ const interval=s.lowPower?450:(s.fps&&s.fps<22?310:210);
  s.trackingInterval=interval;
  if(now-s.lastDetected<interval||video.currentTime===s.lastVideoTime)return;
  s.lastDetected=now;s.lastVideoTime=video.currentTime;
