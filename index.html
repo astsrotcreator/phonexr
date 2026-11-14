@@ -91,7 +91,13 @@
       <div class="detail">НЕ ХОДИ В ЭТИХ ОЧКАХ. Нет оценки препятствий и глубины, а камера работает с задержкой. Проверяй только сидя. При дискомфорте сразу снимай очки.</div>
     </section>
     <section class="card">
-      <h2>03 / Твоя заметка</h2>
+      <h2>03 / Проверка возможностей AR</h2>
+      <p class="detail">Redmi 13 без гироскопа — выбирай «AR по камере»; это экспериментальная фиксация по видимым деталям, а не отслеживание комнаты.</p>
+      <button class="secondary" id="checkARBtn" type="button">Проверить возможности браузера</button>
+      <div class="detail" id="arDiagnostic" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">Нажми проверку.</div>
+    </section>
+    <section class="card">
+      <h2>04 / Твоя заметка</h2>
       <textarea class="field" id="noteText" rows="2" maxlength="220" placeholder="Текст, который будет показан в виртуальном окне">Мой первый виртуальный рабочий стол 👋</textarea>
       <div class="detail">Текст можно изменить здесь до запуска. Настройки и заметка сохраняются в браузере.</div>
     </section>
@@ -151,6 +157,22 @@ $('testCameraBtn').addEventListener('click',async()=>{
 });
 $('stopCameraBtn').addEventListener('click',()=>{stopCameraTest();$('cameraTestResult').textContent='Камера остановлена.';refreshCameraInfo()});
 refreshCameraInfo();
+$('checkARBtn').addEventListener('click',async()=>{
+ const info=[
+  'Защищённое соединение: '+(isSecureContext?'да':'нет'),
+  'Камера в браузере: '+(navigator.mediaDevices?.getUserMedia?'доступна':'нет'),
+  'Web Worker: '+(window.Worker?'доступен':'нет'),
+  'OffscreenCanvas: '+(window.OffscreenCanvas?'доступен':'нет'),
+  'ImageBitmap: '+(window.createImageBitmap?'доступен':'нет'),
+  'Ориентация: '+(window.DeviceOrientationEvent?'API доступен':'нет')
+ ];
+ try{
+  const immersive=await navigator.xr?.isSessionSupported?.('immersive-ar');
+  info.push('WebXR immersive-ar: '+(immersive?'поддерживается':'не подтверждён'));
+ }catch(e){info.push('WebXR immersive-ar: неизвестно')}
+ info.push('Redmi 13: по данным Xiaomi аппаратного гироскопа нет');
+ $('arDiagnostic').textContent=info.join('\\n');
+});
 const BASE_W=1000, BASE_H=700;
 const SETTING_KEYS=['zoom','eyeShift','mirror','showSkeleton','lowPower','disableTracking','visionMode','spatialMode','trackSize','renderScale','noteText'];
 const s={running:false,demo:false,zoom:1,eyeShift:0,mirror:false,showSkeleton:true,lowPower:false,note:'',tracker:null,trackerStatus:'ожидание',cameraStatus:'ожидание',frame:0,hand:null,handSeen:0,pinching:false,pinchCandidate:0,releaseCandidate:0,hold:null,counter:0,timerLength:60,timerRemaining:60,timerRunning:false,timerLast:0,openWindows:[],lastDetected:0,lastVideoTime:-1,fpsSamples:[],fps:0,touchMode:false,sessionId:0,renderScale:1,worker:null,workerReady:false,workerFallback:false,trackingBusy:false,trackerSession:0,inferenceMs:0,drawCount:0,fpsStarted:0,cameraFps:0,cameraFrames:0,cameraFpsStarted:0,captureMs:0,workerFailure:'',handSamples:0,trackingInterval:180,handSamplesStart:0,handDetectFPS:0,visualHand:null,lastVisualUpdate:0,spatialMode:false,spatial:{enabled:false,ready:false,anchored:false,lastEvent:0,source:null,rejected:0,samples:0,pose:null,lastRaw:null,angle:0,filter:0.65},trackSize:224,handMisses:0,visionMode:true,vision:{enabled:false,ready:false,busy:false,worker:null,quality:0,points:0,status:'не запущен',shiftX:0,shiftY:0,targetX:0,targetY:0,lastEvent:0,lastCapture:0,lastVideoTime:-1,processingMs:0}};
@@ -311,7 +333,7 @@ function recenterVision(){
   w.homeX=w.x;w.homeY=w.y;w.hiddenSpatial=false;
  }
  p.shiftX=p.shiftY=p.targetX=p.targetY=0;p.quality=0;p.status='калибровка';
- p.awaitingReset=true;p.worker?.postMessage({type:'reset'});
+ p.awaitingReset=true;if(p.worker)p.worker.postMessage({type:'reset'});else p.awaitingReset=false;
 }
 function startVision(sid){
  const p=s.vision;
@@ -331,9 +353,12 @@ function startVision(sid){
     p.quality=Math.round((data.quality||0)*100);p.processingMs=data.processingMs||0;
     p.status=data.status==='tracking'?'слежение':data.status==='init'?'ищу детали':
       data.status==='reacquire'?'потеряны ориентиры':'неустойчиво';
-    if(data.status==='tracking'&&data.quality>=.53&&data.points>=5){
-     p.targetX=clamp(p.targetX+clamp(data.dx,-14,14)*BASE_W/VISION_W,-4000,4000);
-     p.targetY=clamp(p.targetY+clamp(data.dy,-14,14)*BASE_H/VISION_H,-2600,2600);
+    if(data.status==='tracking'&&data.quality>=.63&&data.points>=5){
+     // Reject single-pixel jitter from camera exposure noise.
+     const dx=Math.abs(data.dx)<1.1?0:data.dx;
+     const dy=Math.abs(data.dy)<1.1?0:data.dy;
+     p.targetX=clamp(p.targetX+clamp(dx,-14,14)*BASE_W/VISION_W,-4000,4000);
+     p.targetY=clamp(p.targetY+clamp(dy,-14,14)*BASE_H/VISION_H,-2600,2600);
     }
    }else if(data.type==='error'){
     p.busy=false;p.status='ошибка: '+String(data.message||'').slice(0,35);
@@ -347,7 +372,7 @@ function stopVision(){
  p.busy=false;p.quality=0;p.points=0;
 }
 function runVision(now){
- const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||!video.videoWidth||video.readyState<2)return;
+ const p=s.vision;if(!p.enabled||!p.ready||!p.worker||p.busy||p.awaitingReset||s.pinching||!video.videoWidth||video.readyState<2)return;
  const interval=s.fps&&s.fps<21?360:s.fps&&s.fps<27?270:185;
  if(now-p.lastCapture<interval||video.currentTime===p.lastVideoTime)return;
  p.busy=true;p.lastCapture=now;p.lastVideoTime=video.currentTime;
