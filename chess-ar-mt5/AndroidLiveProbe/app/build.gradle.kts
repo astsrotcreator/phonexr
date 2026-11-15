@@ -9,8 +9,10 @@ android {
         applicationId = "dev.chessar.liveprobe"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 9
+        versionName = "0.9"
+        // Redmi 13 is arm64. Avoid bundling unused native OpenCV architectures.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -24,6 +26,7 @@ android {
     }
 }
 dependencies {
+    implementation("org.opencv:opencv:4.11.0")
     val v = "3.0.2.8"
     implementation("com.topstep.wearkit:sdk-core:$v")
     implementation("com.topstep.wearkit:sdk-abmate-adapter:$v")
