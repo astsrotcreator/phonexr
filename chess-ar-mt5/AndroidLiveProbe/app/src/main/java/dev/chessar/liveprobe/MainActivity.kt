@@ -43,6 +43,8 @@ class MainActivity : Activity() {
     private var connectionJob: Disposable? = null
     private var videoJob: Disposable? = null
     private var rtspJob: Disposable? = null
+    private var rawProbeJob: Disposable? = null
+    private var rawAddressJob: Disposable? = null
     private var session: WKLiveSession? = null
     private var currentImage: Bitmap? = null
     private var url: String? = null
@@ -56,7 +58,7 @@ class MainActivity : Activity() {
             setPadding(20,20,20,20)
         }
         column.addView(TextView(this).apply {
-            text = "Chess AR — MT5+ Live Probe v0.3"
+            text = "Chess AR — MT5+ Live Probe v0.5"
             textSize = 21f
             setTextColor(0xff165d35.toInt())
         })
@@ -71,6 +73,7 @@ class MainActivity : Activity() {
         column.addView(list)
         column.addView(button("2. Проверить видеопоток") { check() })
         column.addView(button("Диагностика чипа и флага Live (из AIBuds)") { diagnoseHardware() })
+        column.addView(button("ЭКСПЕРИМЕНТ: запрос RTSP без флага Live") { probeDirectRtsp() })
         jpegButton = button("3. JPEG Live — открыть камеру") { startLive() }
         jpegButton.isEnabled = false
         column.addView(jpegButton)
@@ -242,6 +245,72 @@ class MainActivity : Activity() {
         return null
     }
 
+    /**
+     * Sends a single documented RTSP-start command (0xE8) through the AB_MATE
+     * protocol, bypassing the SDK feature advertisement check. Never changes
+     * firmware, resets storage or captures personal files.
+     *
+     * NOTE: The device may reject the request. Even an ACK does NOT prove
+     * Wi-Fi is up or that playable video is available.
+     */
+    private fun probeDirectRtsp() {
+        if (!connected) {
+            status.text = "Сначала подключи MT5+."
+            return
+        }
+        rawProbeJob?.dispose()
+        rawAddressJob?.dispose()
+        try {
+            val fileAbility = sdk.fileAbility as Any
+            val manager = fieldValue(fileAbility, "abMate")
+                ?: error("Не найден внутренний ABMateManager")
+            val connector = fieldValue(fileAbility, "connector")
+            val comm = if (connector != null) fieldValue(connector, "commManager") else null
+            // Register address observer BEFORE sending request.
+            if (comm != null) {
+                val addressMethod = comm.javaClass.methods.firstOrNull {
+                    it.name == "getWifiRtspAddress" && it.parameterCount == 0
+                }
+                val addressObservable = addressMethod?.invoke(comm)
+                if (addressObservable is io.reactivex.rxjava3.core.Observable<*>) {
+                    rawAddressJob = addressObservable
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribe({ value ->
+                            val received = value?.toString()?.trim()
+                            if (!received.isNullOrEmpty()) {
+                                url = received
+                                openButton.isEnabled = true
+                                status.text = "RTSP-адрес получен: $received. Для просмотра нужен доступный Wi-Fi путь и VLC."
+                            }
+                        }, { error -> status.text = "RTSP адрес: ${error.message}" })
+                }
+            }
+            val method = manager.javaClass.methods.firstOrNull {
+                it.name.startsWith("startRtspInternal") && it.parameterCount == 1 &&
+                    it.parameterTypes[0] == Int::class.javaPrimitiveType
+            } ?: error("В этой версии SDK нет внутренней команды запуска RTSP")
+            method.isAccessible = true
+            val result = method.invoke(manager, 50)
+            val operation = result as? io.reactivex.rxjava3.core.Completable
+                ?: error("Команда вернула неожиданный результат")
+            status.text = "Отправлен ОДИН запрос RTSP (0xE8), ожидаю ответ…"
+            rawProbeJob = operation
+                .timeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe({
+                    if (url.isNullOrBlank()) {
+                        status.text = "Команда RTSP принята устройством, но адрес потока не получен. Это НЕ подтверждение видео."
+                    }
+                }, { err ->
+                    val reason = err.cause ?: err
+                    status.text = "Устройство/SDK отклонило прямой RTSP: ${reason.javaClass.simpleName}: ${reason.message}"
+                })
+        } catch (e: Exception) {
+            rawAddressJob?.dispose()
+            status.text = "Прямой RTSP недоступен: ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
     private fun startLive() {
         stopStream()
         if (!connected || !jpegSupported) { status.text = "Live не поддерживается SDK"; return }
@@ -306,6 +375,10 @@ class MainActivity : Activity() {
     }
 
     private fun stopStream() {
+        rawProbeJob?.dispose()
+        rawProbeJob = null
+        rawAddressJob?.dispose()
+        rawAddressJob = null
         videoJob?.dispose()
         videoJob = null
         session?.release()
