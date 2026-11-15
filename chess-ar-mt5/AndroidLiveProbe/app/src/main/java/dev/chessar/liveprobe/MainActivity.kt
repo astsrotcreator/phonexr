@@ -39,7 +39,13 @@ class MainActivity : Activity() {
     private val sdk by lazy { (application as ChessApp).wearKit }
     private lateinit var status: TextView
     private lateinit var list: LinearLayout
-    private lateinit var image: ImageView
+    private lateinit var image: BoardImageView
+    private lateinit var boardInfo: TextView
+    private lateinit var confirmMoveButton: Button
+    private val boardTracker = BoardTracker()
+    private val chessPosition = ChessPosition()
+    private var lastDifference: BoardDifference? = null
+    private var suggestedMove: SuggestedMove? = null
     private lateinit var jpegButton: Button
     private lateinit var rtspButton: Button
     private lateinit var openButton: Button
@@ -78,7 +84,7 @@ class MainActivity : Activity() {
             setPadding(20,20,20,20)
         }
         column.addView(TextView(this).apply {
-            text = "Chess AR — MT5+ AI Camera v0.7"
+            text = "Chess AR — MT5+ Board Tracker v0.8"
             textSize = 21f
             setTextColor(0xff165d35.toInt())
         })
@@ -115,14 +121,95 @@ class MainActivity : Activity() {
         openButton.isEnabled = false
         column.addView(openButton)
         column.addView(button("Остановить обычный видеопоток") { stopStream(); status.text = "Поток остановлен" })
-        image = ImageView(this).apply {
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(0xffeff4ef.toInt())
+        boardInfo = TextView(this).apply {
+            text = "ШАХМАТЫ: сделай AI-фото, затем отметь четыре внешних угла доски."
+            textSize = 16f
+            setPadding(0, 12, 0, 12)
+        }
+        column.addView(boardInfo)
+        column.addView(button("5. РАЗМЕТИТЬ ДОСКУ — 4 касания") {
+            if (currentImage == null) {
+                boardInfo.text = "Сначала сделай AI-фото доски."
+            } else {
+                boardTracker.reset()
+                suggestedMove = null
+                lastDifference = null
+                confirmMoveButton.isEnabled = false
+                image.startCalibration()
+                boardInfo.text = "Коснись 4 УГЛОВ доски по порядку: верхний левый → верхний правый → нижний правый → нижний левый. Не клеток, а внешней границы 8×8."
+            }
+        })
+        column.addView(button("6. ЗАПОМНИТЬ КАДР КАК ЭТАЛОН") {
+            val photo = currentImage
+            if (photo == null || image.corners.size != 4) {
+                boardInfo.text = "Нужно фото и 4 размеченных угла."
+            } else if (!boardTracker.remember(photo, image.corners)) {
+                boardInfo.text = "Углы расположены неправильно или доска слишком маленькая. Разметь заново."
+            } else {
+                suggestedMove = null
+                lastDifference = null
+                image.setDisplayTranslation(0, 0)
+                image.highlighted = emptySet()
+                confirmMoveButton.isEnabled = false
+                boardInfo.text = "Эталон сохранён. Сделай следующий AI-снимок после тренировочного хода. Сравню клетки."
+            }
+        })
+        column.addView(button("7. ПОВЕРНУТЬ КООРДИНАТЫ ДОСКИ (белые/чёрные)") {
+            image.whiteBottom = !image.whiteBottom
+            chessPosition.reset()
+            suggestedMove = null
+            confirmMoveButton.isEnabled = false
+            image.invalidate()
+            boardInfo.text = if (image.whiteBottom) "Белые снизу: слева внизу a1. Партия сброшена."
+                else "Чёрные снизу: слева внизу h8. Партия сброшена."
+        })
+        confirmMoveButton = button("8. ПОДТВЕРДИТЬ НАЙДЕННЫЙ ХОД") {
+            val move = suggestedMove
+            val photo = currentImage
+            val diff = lastDifference
+            if (move != null && photo != null && diff != null && chessPosition.apply(move)) {
+                image.shiftCalibration(diff.shiftX, diff.shiftY)
+                if (boardTracker.remember(photo, image.corners)) {
+                    image.highlighted = emptySet()
+                    lastDifference = null
+                    suggestedMove = null
+                    confirmMoveButton.isEnabled = false
+                    boardInfo.text = "Подтверждён ${move.notation}. Теперь ход ${chessPosition.sideName()}. Эталон обновлён.\\nFEN: ${chessPosition.fen()}"
+                } else {
+                    boardTracker.reset()
+                    boardInfo.text = "Ход подтверждён, но не удалось пересоздать эталон; разметь доску заново."
+                }
+            } else {
+                boardInfo.text = "Невозможно подтвердить: ход или кадр не определён."
+            }
+        }.also { it.isEnabled = false }
+        column.addView(confirmMoveButton)
+        column.addView(button("9. НОВАЯ ПАРТИЯ — СТАРТОВАЯ ПОЗИЦИЯ") {
+            chessPosition.reset()
+            suggestedMove = null
+            lastDifference = null
+            confirmMoveButton.isEnabled = false
+            boardInfo.text = "Шахматные правила сброшены. Расстановка должна быть начальной. Переустанови эталон."
+            boardTracker.reset()
+            image.clearCalibration()
+        })
+        image = BoardImageView(this).apply {
+            onCalibrationChanged = { count ->
+                val name = listOf("верхний левый", "верхний правый", "нижний правый", "нижний левый")
+                if (count in 1..3) boardInfo.text = "Угол $count/4 сохранён. Следующий: ${name[count]}."
+            }
+            onCalibrationDone = { corners ->
+                val photo = currentImage
+                if (photo != null && boardTracker.remember(photo, corners)) {
+                    boardInfo.text = "Сетка нанесена, эталон сохранён! Можно делать новые снимки после хода."
+                } else {
+                    boardInfo.text = "Неправильная разметка, попробуй ещё раз."
+                }
+            }
         }
         column.addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 650))
         column.addView(TextView(this).apply {
-            text = "Режим AI-фото работает без интернета. Быстрая серия — до 10 отдельных снимков: следующий снимок запрашивается после завершения предыдущего и выключения камеры, без прежней паузы 4 секунды. Это не Live-видео. Не оставляй режим включённым надолго."
+            text = "Тест распознавания ИЗМЕНЁННЫХ КЛЕТОК, а не полноценного определения фигур. Используй в тренировочной партии с начальной расстановки. При движении головы, тенях или закрытой рукой доске анализ может быть ненадёжным. Не подтверждай неверный ход."
             setPadding(0,12,0,8)
         })
         setContentView(ScrollView(this).apply { addView(column) })
@@ -449,7 +536,8 @@ class MainActivity : Activity() {
             } else {
                 val old = currentImage
                 currentImage = bitmap
-                image.setImageBitmap(bitmap)
+                image.setPhoto(bitmap)
+                analyzeChessPhoto(bitmap)
                 if (old !== bitmap && old?.isRecycled == false) old.recycle()
                 aiReceived++
                 val now = SystemClock.elapsedRealtime()
@@ -505,6 +593,27 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun analyzeChessPhoto(photo: Bitmap) {
+        if (!boardTracker.calibrated || image.calibrating) return
+        val difference = boardTracker.compare(photo)
+        lastDifference = difference
+        image.setDisplayTranslation(difference.shiftX, difference.shiftY)
+        image.highlighted = difference.changed.toSet()
+        suggestedMove = if (difference.reliable && difference.changed.size == 2)
+            chessPosition.suggest(difference.changed, image.whiteBottom) else null
+        val cells = difference.changed.joinToString(", ") {
+            VisualChess.squareName(it, image.whiteBottom)
+        }.ifBlank { "нет" }
+        val moveText = suggestedMove?.let { "Допустимый вариант: ${it.notation}. Подтверди вручную." }
+            ?: "Автоматического подтверждения хода нет."
+        boardInfo.text =
+            "Сравнение с эталоном: ${difference.message}\\n" +
+            "Клетки: $cells\\n" +
+            "Сдвиг кадра: ${difference.shiftX}, ${difference.shiftY} px; фон: ${"%.1f".format(difference.registrationError)}\\n" +
+            "Очередь: ${chessPosition.sideName()}. $moveText"
+        confirmMoveButton.isEnabled = suggestedMove != null
+    }
+
     private fun cancelAiTimeout() {
         aiTimeout?.let { aiHandler.removeCallbacks(it) }
         aiTimeout = null
@@ -544,7 +653,8 @@ class MainActivity : Activity() {
                     if (bitmap != null && session != null) {
                         val old = currentImage
                         currentImage = bitmap
-                        image.setImageBitmap(bitmap)
+                        image.setPhoto(bitmap)
+                        analyzeChessPhoto(bitmap)
                         if (old !== bitmap && old?.isRecycled == false) old.recycle()
                         frames++
                         val seconds = ((SystemClock.elapsedRealtime() - startMs) / 1000.0).coerceAtLeast(0.1)
