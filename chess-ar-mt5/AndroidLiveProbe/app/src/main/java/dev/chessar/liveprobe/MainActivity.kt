@@ -61,6 +61,8 @@ class MainActivity : Activity() {
     private var aiReceived = 0
     private var aiCaptureStart = 0L
     private var aiElapsedTotal = 0L
+    private var aiBatchStart = 0L
+    private var aiPendingShutdown = false
     private var aiButton: Button? = null
     private var batchButton: Button? = null
     private var session: WKLiveSession? = null
@@ -76,7 +78,7 @@ class MainActivity : Activity() {
             setPadding(20,20,20,20)
         }
         column.addView(TextView(this).apply {
-            text = "Chess AR — MT5+ AI Camera v0.6"
+            text = "Chess AR — MT5+ AI Camera v0.7"
             textSize = 21f
             setTextColor(0xff165d35.toInt())
         })
@@ -95,7 +97,7 @@ class MainActivity : Activity() {
             it.isEnabled = false
             column.addView(it)
         }
-        batchButton = button("4. Серия: пять кадров с интервалом 4 сек") { startAiBatch() }.also {
+        batchButton = button("4. БЫСТРАЯ СЕРИЯ: 10 кадров без паузы 4 сек") { startAiBatch() }.also {
             it.isEnabled = false
             column.addView(it)
         }
@@ -120,7 +122,7 @@ class MainActivity : Activity() {
         }
         column.addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 650))
         column.addView(TextView(this).apply {
-            text = "Главный тест — AI-фото через Bluetooth. Камера снимает отдельный кадр без сохранения в галерею. Серия из 5 снимков оценивает задержку, но НЕ является видеопотоком. Все фото остаются только на экране телефона. Перед подключением закрой AIBuds."
+            text = "Режим AI-фото работает без интернета. Быстрая серия — до 10 отдельных снимков: следующий снимок запрашивается после завершения предыдущего и выключения камеры, без прежней паузы 4 секунды. Это не Live-видео. Не оставляй режим включённым надолго."
             setPadding(0,12,0,8)
         })
         setContentView(ScrollView(this).apply { addView(column) })
@@ -351,14 +353,16 @@ class MainActivity : Activity() {
         if (!connected) { status.text = "Сначала подключи очки"; return }
         stopAiPhoto()
         aiReceived = 0
-        aiElapsedTotal = 0
-        aiBatchRemaining = 5
+        aiElapsedTotal = 0L
+        aiBatchRemaining = 10
+        aiBatchStart = SystemClock.elapsedRealtime()
+        aiPendingShutdown = false
         captureAiPhoto()
     }
 
     private fun captureAiPhoto() {
         if (!connected) { status.text = "Сначала подключи очки"; return }
-        if (aiBusy) { status.text = "Камера уже обрабатывает запрос"; return }
+        if (aiBusy || aiPendingShutdown) { status.text = "Камера ещё занята"; return }
         val manager = managerOrNull() ?: run {
             status.text = "ABMateManager недоступен: проверь соединение"
             return
@@ -448,17 +452,52 @@ class MainActivity : Activity() {
                 image.setImageBitmap(bitmap)
                 if (old !== bitmap && old?.isRecycled == false) old.recycle()
                 aiReceived++
-                val elapsed = SystemClock.elapsedRealtime() - aiCaptureStart
+                val now = SystemClock.elapsedRealtime()
+                val elapsed = now - aiCaptureStart
                 aiElapsedTotal += elapsed
-                status.text = "AI-ФОТО #$aiReceived: ${bitmap.width}×${bitmap.height}, $elapsed мс, ${data.size} Б. Среднее ${aiElapsedTotal / aiReceived} мс. Без интернета!"
-                try { managerOrNull()?.turnOffCamera(onSuccess = {}, onFail = {}) } catch (_: Exception) {}
-                if (aiBatchRemaining > 0) {
+                val total = (now - aiBatchStart).coerceAtLeast(1L)
+                val rate = if (aiBatchStart > 0L) String.format(java.util.Locale.US, "%.2f", aiReceived * 1000.0 / total) else "—"
+                status.text = "AI-ФОТО #$aiReceived: ${bitmap.width}×${bitmap.height}, $elapsed мс, ${data.size} Б. Среднее ${aiElapsedTotal / aiReceived} мс. Серия: $rate кадр/с"
+                val more = if (aiBatchRemaining > 0) {
                     aiBatchRemaining--
-                    if (aiBatchRemaining > 0) {
-                        val next = Runnable { aiNext = null; captureAiPhoto() }
-                        aiNext = next
-                        aiHandler.postDelayed(next, 4000L)
-                    } else status.append("\nСерия завершена: $aiReceived кадров")
+                    aiBatchRemaining > 0
+                } else false
+                aiPendingShutdown = more
+                try {
+                    managerOrNull()?.turnOffCamera(
+                        onSuccess = {
+                            aiHandler.post {
+                                if (more && aiPendingShutdown && connected) {
+                                    aiPendingShutdown = false
+                                    val next = Runnable { aiNext = null; captureAiPhoto() }
+                                    aiNext = next
+                                    aiHandler.postDelayed(next, 150L)
+                                } else if (!more && aiBatchStart > 0L) {
+                                    status.append("\nСерия завершена: $aiReceived кадров. $rate кадр/с")
+                                }
+                            }
+                        },
+                        onFail = {
+                            aiHandler.post {
+                                aiBatchRemaining = 0
+                                aiPendingShutdown = false
+                                status.append("\nНе удалось завершить работу камеры, серия остановлена.")
+                            }
+                        }
+                    )
+                } catch (e: Exception) {
+                    aiPendingShutdown = false
+                    aiBatchRemaining = 0
+                    status.append("\nОшибка отключения камеры: ${e.message}")
+                }
+                if (more) {
+                    aiHandler.postDelayed({
+                        if (aiPendingShutdown) {
+                            aiPendingShutdown = false
+                            aiBatchRemaining = 0
+                            status.append("\nОстановка: камера не подтвердила закрытие за 5 секунд.")
+                        }
+                    }, 5000L)
                 }
             }
         } else {
@@ -478,6 +517,8 @@ class MainActivity : Activity() {
         val wasRunning = aiBusy
         aiBusy = false
         aiBatchRemaining = 0
+        aiPendingShutdown = false
+        aiBatchStart = 0L
         aiBuffer.reset()
         if (wasRunning) {
             try { managerOrNull()?.turnOffCamera(onSuccess = {}, onFail = {}) } catch (_: Exception) {}
