@@ -70,6 +70,7 @@ class MainActivity : Activity() {
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         column.addView(list)
         column.addView(button("2. Проверить видеопоток") { check() })
+        column.addView(button("Диагностика чипа и флага Live (из AIBuds)") { diagnoseHardware() })
         jpegButton = button("3. JPEG Live — открыть камеру") { startLive() }
         jpegButton.isEnabled = false
         column.addView(jpegButton)
@@ -177,6 +178,68 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             status.text = "Ошибка определения возможностей: ${e.message}"
         }
+    }
+
+    /**
+     * Read-only hardware diagnostics.
+     * AIBuds LiveCapability checks device ability bit 0x40 and copro type
+     * before allowing JPEG/RTSP. Data is read from SDK cache only.
+     */
+    private fun diagnoseHardware() {
+        if (!connected) {
+            status.text = "Сначала подключи MT5+ через поиск устройства."
+            return
+        }
+        try {
+            val ability: Any = sdk.cameraAbility
+            val connector = fieldValue(ability, "connector")
+                ?: error("Нет поля connector в ${ability.javaClass.name}")
+            val method = connector.javaClass.methods.firstOrNull { it.name == "getCommManager" && it.parameterCount == 0 }
+                ?: connector.javaClass.declaredMethods.firstOrNull { it.name == "getCommManager" && it.parameterCount == 0 }
+                ?: error("Нет getCommManager в ${connector.javaClass.name}")
+            method.isAccessible = true
+            val manager = method.invoke(connector) ?: error("CommManager ещё не готов")
+            fun call(name: String): Any? {
+                val m = manager.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }
+                    ?: manager.javaClass.declaredMethods.firstOrNull { it.name == name && it.parameterCount == 0 }
+                    ?: error("Нет $name в SDK")
+                m.isAccessible = true
+                return m.invoke(manager)
+            }
+            val bytes = call("getCachedDeviceAbility") as? ByteArray
+            val copro = (call("getCachedDeviceCoprocessor") as? Number)?.toInt()
+            val flag = bytes?.firstOrNull()?.toInt()?.and(0xff)?.and(0x40) == 0x40
+            val hex = bytes?.take(12)?.joinToString(" ") { "%02X".format(it.toInt() and 0xff) } ?: "не получены"
+            val notes = when(copro) {
+                1,2 -> "RTSP-тип по коду AIBuds"
+                3,4,5 -> "JPEG-тип по коду AIBuds"
+                null -> "тип не получен"
+                else -> "возможен неизвестный/неподдерживаемый тип"
+            }
+            status.text =
+                "DEBUG MT5+ (без передачи данных)\\n" +
+                "Флаг 0x40: $flag\\n" +
+                "Возможности: $hex\\n" +
+                "Камерный чип: $copro ($notes)\\n" +
+                "JPEG Live: ${sdk.cameraAbility.compat.isSupportLive()}\\n" +
+                "RTSP: ${sdk.fileAbility.compat.isSupportRtsp()}"
+        } catch (e: Exception) {
+            status.text = "Не удалось прочитать данные SDK: ${e.javaClass.simpleName}: ${e.message}\\nКласс: ${sdk.cameraAbility.javaClass.name}"
+        }
+    }
+
+    private fun fieldValue(target: Any, fieldName: String): Any? {
+        var cls: Class<*>? = target.javaClass
+        while (cls != null) {
+            try {
+                val field = cls.getDeclaredField(fieldName)
+                field.isAccessible = true
+                return field.get(target)
+            } catch (_: NoSuchFieldException) {
+                cls = cls.superclass
+            }
+        }
+        return null
     }
 
     private fun startLive() {
