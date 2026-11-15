@@ -144,7 +144,7 @@ class MainActivity : Activity() {
          .subscribe({ result ->
              val address = result.device.address
              if ((0 until list.childCount).any { list.getChildAt(it).tag == address }) return@subscribe
-             list.addView(button("${result.name.ifBlank { "(без названия)" }} — $address") {
+             list.addView(button("${(result.name?.ifBlank { "(без названия)" } ?: "(без названия)")} — $address") {
                  connect(address)
              }.apply { tag = address })
          }, { error -> status.text = "Ошибка поиска: ${error.message}" })
