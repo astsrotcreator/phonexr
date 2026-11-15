@@ -1,0 +1,40 @@
+name: Chess AR MT5 Live Test APK
+on:
+  push:
+    branches: [chess-ar-mt5]
+    paths:
+      - 'chess-ar-mt5/**'
+      - '.github/workflows/chess-ar-mt5-apk.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android platform
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build
+        working-directory: chess-ar-mt5/AndroidLiveProbe
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessAR_MT5_Live_Test_APK
+          path: chess-ar-mt5/AndroidLiveProbe/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
