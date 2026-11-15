@@ -21,6 +21,22 @@ class BoardImageView @JvmOverloads constructor(
     val corners = ArrayList<PointF>()
     var calibrating = false
         private set
+    private var overlayValid = true
+    fun setTrackedCorners(updated: List<PointF>) {
+        if (updated.size == 4) {
+            corners.clear()
+            corners.addAll(updated.map { PointF(it.x, it.y) })
+            displayShiftX = 0
+            displayShiftY = 0
+            overlayValid = true
+        } else overlayValid = false
+        invalidate()
+    }
+    fun hideTrackingGrid() {
+        overlayValid = false
+        highlighted = emptySet()
+        invalidate()
+    }
     var whiteBottom = true
     var highlighted: Set<Int> = emptySet()
         set(value) { field = value; invalidate() }
@@ -62,6 +78,7 @@ class BoardImageView @JvmOverloads constructor(
         displayShiftX = 0; displayShiftY = 0
         corners.clear()
         highlighted = emptySet()
+        overlayValid = true
         calibrating = true
         onCalibrationChanged?.invoke(0)
         invalidate()
@@ -70,6 +87,7 @@ class BoardImageView @JvmOverloads constructor(
     fun clearCalibration() {
         displayShiftX = 0; displayShiftY = 0
         calibrating = false
+        overlayValid = true
         corners.clear()
         highlighted = emptySet()
         invalidate()
@@ -133,7 +151,7 @@ class BoardImageView @JvmOverloads constructor(
             canvas.drawCircle(c.x, c.y, 8f, cornerPaint)
             canvas.drawText("${i + 1}", c.x + 10, c.y - 10, labels)
         }
-        if (corners.size < 4) return
+        if (corners.size < 4 || !overlayValid) return
         val homography = BoardHomography.fromCorners(corners, bitmapWidth, bitmapHeight) ?: return
         fun screen(u: Double, v: Double): PointF {
             val p = homography.map(u, v)
