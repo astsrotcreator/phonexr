@@ -12,6 +12,12 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import java.io.ByteArrayOutputStream
+import com.topstep.wearkit.abmate.apis.AbMateSDK
+import com.bluetrum.devicemanager.models.AIPicPackage
+import androidx.lifecycle.Observer
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.Button
@@ -28,7 +34,7 @@ import io.reactivex.rxjava3.core.BackpressureStrategy
 import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
 
-/** Only tests live video support. Does not upload, record, or analyze images. */
+/** Tests on-device camera capabilities. AI photo uses Bluetooth, no cloud or uploads. */
 class MainActivity : Activity() {
     private val sdk by lazy { (application as ChessApp).wearKit }
     private lateinit var status: TextView
@@ -45,6 +51,18 @@ class MainActivity : Activity() {
     private var rtspJob: Disposable? = null
     private var rawProbeJob: Disposable? = null
     private var rawAddressJob: Disposable? = null
+    private val aiHandler = Handler(Looper.getMainLooper())
+    private var aiTimeout: Runnable? = null
+    private var aiNext: Runnable? = null
+    private var aiObserver: Observer<AIPicPackage>? = null
+    private var aiBuffer = ByteArrayOutputStream()
+    private var aiBusy = false
+    private var aiBatchRemaining = 0
+    private var aiReceived = 0
+    private var aiCaptureStart = 0L
+    private var aiElapsedTotal = 0L
+    private var aiButton: Button? = null
+    private var batchButton: Button? = null
     private var session: WKLiveSession? = null
     private var currentImage: Bitmap? = null
     private var url: String? = null
@@ -58,7 +76,7 @@ class MainActivity : Activity() {
             setPadding(20,20,20,20)
         }
         column.addView(TextView(this).apply {
-            text = "Chess AR — MT5+ Live Probe v0.5"
+            text = "Chess AR — MT5+ AI Camera v0.6"
             textSize = 21f
             setTextColor(0xff165d35.toInt())
         })
@@ -73,7 +91,18 @@ class MainActivity : Activity() {
         column.addView(list)
         column.addView(button("2. Проверить видеопоток") { check() })
         column.addView(button("Диагностика чипа и флага Live (из AIBuds)") { diagnoseHardware() })
-        column.addView(button("ЭКСПЕРИМЕНТ: запрос RTSP без флага Live") { probeDirectRtsp() })
+        aiButton = button("3. AI-фото через Bluetooth (без альбома)") { captureAiPhoto() }.also {
+            it.isEnabled = false
+            column.addView(it)
+        }
+        batchButton = button("4. Серия: пять кадров с интервалом 4 сек") { startAiBatch() }.also {
+            it.isEnabled = false
+            column.addView(it)
+        }
+        column.addView(button("Остановить AI-тест") {
+            stopAiPhoto()
+            status.text = "AI-тест остановлен"
+        })
         jpegButton = button("3. JPEG Live — открыть камеру") { startLive() }
         jpegButton.isEnabled = false
         column.addView(jpegButton)
@@ -83,7 +112,7 @@ class MainActivity : Activity() {
         openButton = button("5. RTSP — открыть в VLC") { openRtsp() }
         openButton.isEnabled = false
         column.addView(openButton)
-        column.addView(button("Остановить поток") { stopStream(); status.text = "Остановлено" })
+        column.addView(button("Остановить обычный видеопоток") { stopStream(); status.text = "Поток остановлен" })
         image = ImageView(this).apply {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -91,7 +120,7 @@ class MainActivity : Activity() {
         }
         column.addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 650))
         column.addView(TextView(this).apply {
-            text = "Это тест SDK AB_MATE. Если очки не найдены или поток недоступен, это ещё не значит, что камера технически не может транслировать. Перед подключением останови AIBuds. RTSP может потребовать VLC."
+            text = "Главный тест — AI-фото через Bluetooth. Камера снимает отдельный кадр без сохранения в галерею. Серия из 5 снимков оценивает задержку, но НЕ является видеопотоком. Все фото остаются только на экране телефона. Перед подключением закрой AIBuds."
             setPadding(0,12,0,8)
         })
         setContentView(ScrollView(this).apply { addView(column) })
@@ -101,11 +130,14 @@ class MainActivity : Activity() {
             .subscribe({ state ->
                 connected = state == WKConnectorState.CONNECTED
                 status.text = "Подключение: $state"
+                aiButton?.isEnabled = connected
+                batchButton?.isEnabled = connected
                 if (connected) check()
                 else {
                     jpegButton.isEnabled = false
                     rtspButton.isEnabled = false
                     stopStream()
+                    stopAiPhoto()
                 }
             }, { error -> status.text = "Ошибка подключения: ${error.message}" })
         askPermissions()
@@ -311,6 +343,147 @@ class MainActivity : Activity() {
         }
     }
 
+
+    /** Official Topstep ABMateManager AI camera path (mode 1). */
+    private fun managerOrNull() = (sdk.getRawSDK() as? AbMateSDK)?.abMateManager
+
+    private fun startAiBatch() {
+        if (!connected) { status.text = "Сначала подключи очки"; return }
+        stopAiPhoto()
+        aiReceived = 0
+        aiElapsedTotal = 0
+        aiBatchRemaining = 5
+        captureAiPhoto()
+    }
+
+    private fun captureAiPhoto() {
+        if (!connected) { status.text = "Сначала подключи очки"; return }
+        if (aiBusy) { status.text = "Камера уже обрабатывает запрос"; return }
+        val manager = managerOrNull() ?: run {
+            status.text = "ABMateManager недоступен: проверь соединение"
+            return
+        }
+        try {
+            if (aiObserver == null) {
+                // The packets arrive via LiveData and may be fragmented.
+                val observer = Observer<AIPicPackage> { packet ->
+                    if (packet != null && aiBusy) handleAiPacket(packet)
+                }
+                manager.getRepository().aiPicPackage.observeForever(observer)
+                aiObserver = observer
+            }
+            aiBusy = true
+            aiBuffer.reset()
+            aiCaptureStart = SystemClock.elapsedRealtime()
+            status.text = "Отправляю AI-фото в очки. Смотри на доску…"
+            val onTimeout = Runnable {
+                if (aiBusy) {
+                    aiBusy = false
+                    aiBatchRemaining = 0
+                    status.text = "Нет JPEG за 15 секунд. Проверь камеру/подключение."
+                    try { manager.turnOffCamera(onSuccess = {}, onFail = {}) } catch (_: Exception) {}
+                }
+            }
+            aiTimeout = onTimeout
+            aiHandler.postDelayed(onTimeout, 15000L)
+            manager.turnOnCamera(1, onSuccess = {
+                // An ACK is NOT proof that an image has arrived.
+                if (aiBusy) status.text = "Команда принята; ожидаю JPEG-пакеты от MT5+…"
+            }, onFail = {
+                cancelAiTimeout()
+                aiBusy = false
+                aiBatchRemaining = 0
+                status.text = "Очки отклонили режим AI-фото"
+            })
+        } catch (e: Exception) {
+            cancelAiTimeout()
+            aiBusy = false
+            aiBatchRemaining = 0
+            status.text = "Ошибка AI-фото: ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    private fun handleAiPacket(packet: AIPicPackage) {
+        val bytes = packet.picFlow ?: byteArrayOf()
+        val code = packet.status
+        if (code == 0xFE || code == 0xFF) {
+            cancelAiTimeout()
+            aiBusy = false
+            aiBatchRemaining = 0
+            status.text = if (code == 0xFE) "Память камеры заполнена" else "Ошибка передачи изображения по Bluetooth"
+            return
+        }
+        if (bytes.isNotEmpty()) {
+            // The first JPEG segment starts a new image.
+            if (bytes.size >= 2 && (bytes[0].toInt() and 0xff) == 0xff &&
+                (bytes[1].toInt() and 0xff) == 0xd8 && aiBuffer.size() > 0) {
+                aiBuffer.reset()
+            }
+            if (aiBuffer.size() + bytes.size > 3_000_000) {
+                aiBusy = false
+                aiBatchRemaining = 0
+                cancelAiTimeout()
+                status.text = "Слишком большой кадр — остановлено"
+                return
+            }
+            aiBuffer.write(bytes)
+        }
+        val data = aiBuffer.toByteArray()
+        val jpegComplete = data.size >= 4 &&
+            (data[0].toInt() and 0xff) == 0xff &&
+            (data[1].toInt() and 0xff) == 0xd8 &&
+            (data[data.size - 2].toInt() and 0xff) == 0xff &&
+            (data.last().toInt() and 0xff) == 0xd9
+        if (jpegComplete || code == 0) {
+            cancelAiTimeout()
+            aiBusy = false
+            aiBuffer.reset()
+            val bitmap = if (data.isNotEmpty()) BitmapFactory.decodeByteArray(data, 0, data.size) else null
+            if (bitmap == null) {
+                aiBatchRemaining = 0
+                status.text = "Получены пакеты, но JPEG не собран. Байты: ${data.size}, статус: $code"
+            } else {
+                val old = currentImage
+                currentImage = bitmap
+                image.setImageBitmap(bitmap)
+                if (old !== bitmap && old?.isRecycled == false) old.recycle()
+                aiReceived++
+                val elapsed = SystemClock.elapsedRealtime() - aiCaptureStart
+                aiElapsedTotal += elapsed
+                status.text = "AI-ФОТО #$aiReceived: ${bitmap.width}×${bitmap.height}, $elapsed мс, ${data.size} Б. Среднее ${aiElapsedTotal / aiReceived} мс. Без интернета!"
+                try { managerOrNull()?.turnOffCamera(onSuccess = {}, onFail = {}) } catch (_: Exception) {}
+                if (aiBatchRemaining > 0) {
+                    aiBatchRemaining--
+                    if (aiBatchRemaining > 0) {
+                        val next = Runnable { aiNext = null; captureAiPhoto() }
+                        aiNext = next
+                        aiHandler.postDelayed(next, 4000L)
+                    } else status.append("\nСерия завершена: $aiReceived кадров")
+                }
+            }
+        } else {
+            status.text = "Получаю AI-фото: ${data.size} байт (статус $code)"
+        }
+    }
+
+    private fun cancelAiTimeout() {
+        aiTimeout?.let { aiHandler.removeCallbacks(it) }
+        aiTimeout = null
+    }
+
+    private fun stopAiPhoto() {
+        cancelAiTimeout()
+        aiNext?.let { aiHandler.removeCallbacks(it) }
+        aiNext = null
+        val wasRunning = aiBusy
+        aiBusy = false
+        aiBatchRemaining = 0
+        aiBuffer.reset()
+        if (wasRunning) {
+            try { managerOrNull()?.turnOffCamera(onSuccess = {}, onFail = {}) } catch (_: Exception) {}
+        }
+    }
+
     private fun startLive() {
         stopStream()
         if (!connected || !jpegSupported) { status.text = "Live не поддерживается SDK"; return }
@@ -393,6 +566,11 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopAiPhoto()
+        aiObserver?.let { observer ->
+            try { managerOrNull()?.getRepository()?.aiPicPackage?.removeObserver(observer) } catch (_: Exception) {}
+        }
+        aiObserver = null
         stopStream()
         scanJob?.dispose()
         connectionJob?.dispose()
