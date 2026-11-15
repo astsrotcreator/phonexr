@@ -18,6 +18,7 @@ import java.io.ByteArrayOutputStream
 import com.topstep.wearkit.abmate.apis.AbMateSDK
 import com.bluetrum.devicemanager.models.AIPicPackage
 import androidx.lifecycle.Observer
+import org.opencv.android.OpenCVLoader
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.Button
@@ -42,7 +43,8 @@ class MainActivity : Activity() {
     private lateinit var image: BoardImageView
     private lateinit var boardInfo: TextView
     private lateinit var confirmMoveButton: Button
-    private val boardTracker = BoardTracker()
+    private val boardTracker = StableBoardTracker()
+    private var visionReady = false
     private val chessPosition = ChessPosition()
     private var lastDifference: BoardDifference? = null
     private var suggestedMove: SuggestedMove? = null
@@ -79,12 +81,13 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        visionReady = try { OpenCVLoader.initLocal() } catch (_: Throwable) { false }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20,20,20,20)
         }
         column.addView(TextView(this).apply {
-            text = "Chess AR — MT5+ Board Tracker v0.8"
+            text = "Chess AR — MT5+ Board Tracker v0.9"
             textSize = 21f
             setTextColor(0xff165d35.toInt())
         })
@@ -127,7 +130,13 @@ class MainActivity : Activity() {
             setPadding(0, 12, 0, 12)
         }
         column.addView(boardInfo)
+        if (!visionReady) boardInfo.text =
+            "OpenCV не загрузился на этом устройстве. AI-фото работает, но привязка доски недоступна."
         column.addView(button("5. РАЗМЕТИТЬ ДОСКУ — 4 касания") {
+            if (!visionReady) {
+                boardInfo.text = "Не загрузилась библиотека OpenCV — проверь arm64 Android."
+                return@button
+            }
             if (currentImage == null) {
                 boardInfo.text = "Сначала сделай AI-фото доски."
             } else {
@@ -167,17 +176,19 @@ class MainActivity : Activity() {
             val move = suggestedMove
             val photo = currentImage
             val diff = lastDifference
-            if (move != null && photo != null && diff != null && chessPosition.apply(move)) {
-                image.shiftCalibration(diff.shiftX, diff.shiftY)
-                if (boardTracker.remember(photo, image.corners)) {
+            if (move != null && photo != null && diff != null &&
+                diff.aligned && diff.updatedCorners.size == 4) {
+                if (boardTracker.remember(photo, diff.updatedCorners) &&
+                    chessPosition.apply(move)) {
+                    image.setTrackedCorners(diff.updatedCorners)
                     image.highlighted = emptySet()
                     lastDifference = null
                     suggestedMove = null
                     confirmMoveButton.isEnabled = false
-                    boardInfo.text = "Подтверждён ${move.notation}. Теперь ход ${chessPosition.sideName()}. Эталон обновлён.\\nFEN: ${chessPosition.fen()}"
+                    boardInfo.text = "Подтверждён ${move.notation}. Теперь ход ${chessPosition.sideName()}. Эталон обновлён.\nFEN: ${chessPosition.fen()}"
                 } else {
                     boardTracker.reset()
-                    boardInfo.text = "Ход подтверждён, но не удалось пересоздать эталон; разметь доску заново."
+                    boardInfo.text = "Не удалось пересоздать эталон. Ход не подтверждён — разметь доску заново."
                 }
             } else {
                 boardInfo.text = "Невозможно подтвердить: ход или кадр не определён."
@@ -341,14 +352,14 @@ class MainActivity : Activity() {
                 else -> "возможен неизвестный/неподдерживаемый тип"
             }
             status.text =
-                "DEBUG MT5+ (без передачи данных)\\n" +
-                "Флаг 0x40: $flag\\n" +
-                "Возможности: $hex\\n" +
-                "Камерный чип: $copro ($notes)\\n" +
-                "JPEG Live: ${sdk.cameraAbility.compat.isSupportLive()}\\n" +
+                "DEBUG MT5+ (без передачи данных)\n" +
+                "Флаг 0x40: $flag\n" +
+                "Возможности: $hex\n" +
+                "Камерный чип: $copro ($notes)\n" +
+                "JPEG Live: ${sdk.cameraAbility.compat.isSupportLive()}\n" +
                 "RTSP: ${sdk.fileAbility.compat.isSupportRtsp()}"
         } catch (e: Exception) {
-            status.text = "Не удалось прочитать данные SDK: ${e.javaClass.simpleName}: ${e.message}\\nКласс: ${sdk.cameraAbility.javaClass.name}"
+            status.text = "Не удалось прочитать данные SDK: ${e.javaClass.simpleName}: ${e.message}\nКласс: ${sdk.cameraAbility.javaClass.name}"
         }
     }
 
@@ -594,22 +605,32 @@ class MainActivity : Activity() {
     }
 
     private fun analyzeChessPhoto(photo: Bitmap) {
-        if (!boardTracker.calibrated || image.calibrating) return
+        if (!visionReady || !boardTracker.calibrated || image.calibrating) return
         val difference = boardTracker.compare(photo)
         lastDifference = difference
-        image.setDisplayTranslation(difference.shiftX, difference.shiftY)
-        image.highlighted = difference.changed.toSet()
-        suggestedMove = if (difference.reliable && difference.changed.size == 2)
+        if (difference.aligned && difference.updatedCorners.size == 4) {
+            image.setTrackedCorners(difference.updatedCorners)
+            image.highlighted = difference.changed.toSet()
+        } else {
+            // Do not paint the old grid over a moved camera view.
+            image.hideTrackingGrid()
+            image.highlighted = emptySet()
+        }
+        suggestedMove = if (difference.aligned && difference.reliable &&
+                difference.changed.size == 2)
             chessPosition.suggest(difference.changed, image.whiteBottom) else null
         val cells = difference.changed.joinToString(", ") {
             VisualChess.squareName(it, image.whiteBottom)
         }.ifBlank { "нет" }
-        val moveText = suggestedMove?.let { "Допустимый вариант: ${it.notation}. Подтверди вручную." }
-            ?: "Автоматического подтверждения хода нет."
+        val moveText = suggestedMove?.let {
+            "Допустимый вариант: ${it.notation}. Подтверди вручную."
+        } ?: "Ход не подтверждён."
         boardInfo.text =
-            "Сравнение с эталоном: ${difference.message}\\n" +
-            "Клетки: $cells\\n" +
-            "Сдвиг кадра: ${difference.shiftX}, ${difference.shiftY} px; фон: ${"%.1f".format(difference.registrationError)}\\n" +
+            "Совмещение перспективы: ${if (difference.aligned) "OK" else "ПОТЕРЯНО"}. " +
+            "Точек: ${difference.inliers}/${difference.featureCount}.\n" +
+            "${difference.message}\n" +
+            "Изменённые клетки: $cells\n" +
+            "Сдвиг: ${difference.shiftX}, ${difference.shiftY} px; ошибка: ${"%.2f".format(difference.registrationError)} px.\n" +
             "Очередь: ${chessPosition.sideName()}. $moveText"
         confirmMoveButton.isEnabled = suggestedMove != null
     }
@@ -717,6 +738,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        boardTracker.reset()
         stopAiPhoto()
         aiObserver?.let { observer ->
             try { managerOrNull()?.getRepository()?.aiPicPackage?.removeObserver(observer) } catch (_: Exception) {}
