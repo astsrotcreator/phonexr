@@ -54,7 +54,7 @@ class MainActivity : Activity() {
     private val aiHandler = Handler(Looper.getMainLooper())
     private var aiTimeout: Runnable? = null
     private var aiNext: Runnable? = null
-    private var aiObserver: Observer<AIPicPackage>? = null
+    private var aiObserver: Observer<AIPicPackage?>? = null
     private var aiBuffer = ByteArrayOutputStream()
     private var aiBusy = false
     private var aiBatchRemaining = 0
@@ -366,7 +366,7 @@ class MainActivity : Activity() {
         try {
             if (aiObserver == null) {
                 // The packets arrive via LiveData and may be fragmented.
-                val observer = Observer<AIPicPackage> { packet ->
+                val observer = Observer<AIPicPackage?> { packet ->
                     if (packet != null && aiBusy) handleAiPacket(packet)
                 }
                 manager.getRepository().aiPicPackage.observeForever(observer)
