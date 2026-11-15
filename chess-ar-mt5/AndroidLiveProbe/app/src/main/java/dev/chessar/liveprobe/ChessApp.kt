@@ -5,6 +5,7 @@ import android.app.Application
 import android.os.Bundle
 import com.polidea.rxandroidble3.RxBleClient
 import com.topstep.wearkit.abmate.WKAbMateKit
+import com.topstep.wearkit.abmate.apis.AbMateSDK
 import com.topstep.wearkit.apis.WKWearKit
 import com.topstep.wearkit.base.ProcessLifecycleManager
 import com.topstep.wearkit.core.buildWKWearKit
@@ -19,6 +20,8 @@ class ChessApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Timber.plant(Timber.DebugTree())
+        // Test bonded Classic Bluetooth SPP instead of BLE GATT for AB_MATE.
+        AbMateSDK.BLE_CONNECTION = false
         val tracker = ForegroundTracker()
         registerActivityLifecycleCallbacks(tracker)
         wearKit = buildWKWearKit(
