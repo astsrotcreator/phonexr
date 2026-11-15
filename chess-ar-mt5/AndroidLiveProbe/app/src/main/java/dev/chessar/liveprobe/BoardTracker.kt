@@ -61,7 +61,11 @@ data class BoardDifference(
     val registrationError: Double,
     val noise: Double,
     val message: String,
-    val reliable: Boolean
+    val reliable: Boolean,
+    val aligned: Boolean = reliable,
+    val updatedCorners: List<PointF> = emptyList(),
+    val inliers: Int = 0,
+    val featureCount: Int = 0
 )
 
 /**
