@@ -24,6 +24,8 @@ class BoardImageView @JvmOverloads constructor(
     var whiteBottom = true
     var highlighted: Set<Int> = emptySet()
         set(value) { field = value; invalidate() }
+    private var displayShiftX = 0
+    private var displayShiftY = 0
     private var bitmapWidth = 0
     private var bitmapHeight = 0
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -52,7 +54,12 @@ class BoardImageView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun setDisplayTranslation(dx: Int, dy: Int) {
+        displayShiftX = dx; displayShiftY = dy; invalidate()
+    }
+
     fun startCalibration() {
+        displayShiftX = 0; displayShiftY = 0
         corners.clear()
         highlighted = emptySet()
         calibrating = true
@@ -61,6 +68,7 @@ class BoardImageView @JvmOverloads constructor(
     }
 
     fun clearCalibration() {
+        displayShiftX = 0; displayShiftY = 0
         calibrating = false
         corners.clear()
         highlighted = emptySet()
@@ -69,6 +77,7 @@ class BoardImageView @JvmOverloads constructor(
 
     fun shiftCalibration(dx: Int, dy: Int) {
         if (bitmapWidth <= 0 || bitmapHeight <= 0) return
+        displayShiftX = 0; displayShiftY = 0
         for (p in corners) {
             p.x = (p.x + dx.toFloat() / bitmapWidth).coerceIn(0f, 1f)
             p.y = (p.y + dy.toFloat() / bitmapHeight).coerceIn(0f, 1f)
@@ -120,13 +129,16 @@ class BoardImageView @JvmOverloads constructor(
         super.onDraw(canvas)
         val params = imageParams() ?: return
         for ((i, corner) in corners.withIndex()) {
-            val c = toScreen(PointF(corner.x * bitmapWidth, corner.y * bitmapHeight), params)
+            val c = toScreen(PointF(corner.x * bitmapWidth + displayShiftX, corner.y * bitmapHeight + displayShiftY), params)
             canvas.drawCircle(c.x, c.y, 8f, cornerPaint)
             canvas.drawText("${i + 1}", c.x + 10, c.y - 10, labels)
         }
         if (corners.size < 4) return
         val homography = BoardHomography.fromCorners(corners, bitmapWidth, bitmapHeight) ?: return
-        fun screen(u: Double, v: Double) = toScreen(homography.map(u, v), params)
+        fun screen(u: Double, v: Double): PointF {
+            val p = homography.map(u, v)
+            return toScreen(PointF(p.x + displayShiftX, p.y + displayShiftY), params)
+        }
         for (n in 0..8) {
             val p = n / 8.0
             val a = screen(p, 0.0); val b = screen(p, 1.0)
